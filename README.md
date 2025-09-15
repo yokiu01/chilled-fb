@@ -39,7 +39,7 @@
 
 ### 1. 프로젝트 클론
 ```bash
-git clone [repository-url]
+git clone https://github.com/Hellenak68/Choomaru.git
 cd choomaru_mvp
 ```
 
@@ -90,7 +90,7 @@ numpy
 
 ## 👥 개발자
 
-- **기획 및 개발**: [Your Name]
+- **기획 및 개발**: Hellenak68
 - **AI 코딩 멘토**: Claude AI
 
 ## 📄 라이선스
