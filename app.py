@@ -574,18 +574,29 @@ def result_page():
         dna_info = dna_types[st.session_state.dna_type]
         
         st.markdown(f"""
-        <div style='text-align: center; padding: 2.5rem; background: linear-gradient(135deg, {dna_info['color']}33, {dna_info['color']}55); border-radius: 20px; margin: 2rem 0; border: 2px solid {dna_info['color']}88;'>
-            <h1 style='font-size: 2.5rem; margin-bottom: 1.5rem; color: #222; font-weight: bold; text-shadow: 1px 1px 2px rgba(255,255,255,0.8);'>
+        <div style='text-align: center; padding: 3rem; background: white; border-radius: 20px; margin: 2rem 0; border: 4px solid {dna_info['color']}; box-shadow: 0 8px 16px rgba(0,0,0,0.1);'>
+            <h1 style='font-size: 2.5rem; margin-bottom: 1.5rem; color: {dna_info['color']}; font-weight: bold;'>
                 {dna_info['name']}
             </h1>
-            <p style='font-size: 1.3rem; color: #333; font-weight: 500; line-height: 1.6; text-shadow: 0.5px 0.5px 1px rgba(255,255,255,0.7);'>
+            <p style='font-size: 1.3rem; color: #333; font-weight: 500; line-height: 1.6; background: #f8f9fa; padding: 1rem; border-radius: 10px;'>
                 {dna_info['description']}
             </p>
         </div>
         """, unsafe_allow_html=True)
         
         st.markdown("### 🎥 전문가 영상 보기")
-        st.video(dna_info['video_url'])
+        
+        # 38초 전문가 영상 플레이스홀더
+        st.markdown("""
+        <div style='text-align: center; padding: 2rem; background: #f8f9fa; border-radius: 15px; border: 2px solid #667eea; margin: 1rem 0;'>
+            <div style='font-size: 3rem; margin-bottom: 1rem;'>🎬</div>
+            <h4 style='color: #667eea; margin-bottom: 1rem;'>전문가 시연 영상 (38초)</h4>
+            <p style='color: #666; font-size: 0.9rem;'>여러 동작을 연결한 완성된 시연</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # 전문가 영상 플레이스홀더
+        st.info("🎬 전문가 시연 영상이 여기에 표시됩니다")
         
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
@@ -620,9 +631,9 @@ def dance_page():
     if st.session_state.dna_type:
         dna_info = dna_types[st.session_state.dna_type]
         st.markdown(f"""
-        <div style='text-align: center; padding: 1.5rem; background: {dna_info['color']}44; border-radius: 12px; margin: 1rem 0; border: 2px solid {dna_info['color']}77;'>
-            <p style='margin: 0; color: #111; font-size: 1.1rem; font-weight: bold; text-shadow: 0.5px 0.5px 1px rgba(255,255,255,0.8);'>
-                <strong>당신의 춤 DNA:</strong> {dna_info['name']}
+        <div style='text-align: center; padding: 1.5rem; background: white; border-radius: 12px; margin: 1rem 0; border: 3px solid {dna_info['color']}; box-shadow: 0 4px 8px rgba(0,0,0,0.1);'>
+            <p style='margin: 0; color: #333; font-size: 1.2rem; font-weight: bold;'>
+                <strong style='color: {dna_info['color']};'>당신의 춤 DNA:</strong> {dna_info['name']}
             </p>
         </div>
         """, unsafe_allow_html=True)
@@ -652,19 +663,37 @@ def dance_page():
         <p style='text-align: center; color: #666; font-size: 1.1rem; margin-bottom: 1rem;'>
             {current_pose['description']}
         </p>
-        <div style='text-align: center; padding: 1.5rem; background: #e8f4f8; border-radius: 10px; border: 2px solid #667eea;'>
-            <p style='margin: 0; color: #111; font-weight: bold; font-size: 1.1rem; text-shadow: 0.5px 0.5px 1px rgba(255,255,255,0.9);'>
+        <div style='text-align: center; padding: 2rem; background: #667eea; border-radius: 12px; border: 3px solid #4c63d2; box-shadow: 0 4px 8px rgba(0,0,0,0.1);'>
+            <p style='margin: 0; color: white; font-weight: bold; font-size: 1.2rem;'>
                 📋 {current_pose['instruction']}
             </p>
         </div>
     </div>
     """, unsafe_allow_html=True)
     
-    # 웹캠 영역
-    col1, col2 = st.columns([2, 1])
+    # 영상 영역 - 전문가 시범과 사용자 웹캠
+    col1, col2 = st.columns([1, 1], gap="large")
     
     with col1:
-        st.markdown("### 📹 웹캠")
+        st.markdown("### 🎥 전문가 시범 영상")
+        
+        # 동작별 시범 영상 플레이스홀더
+        
+        # 현재 동작의 시범 영상 표시
+        st.markdown(f"**{current_pose['name']} 시범**")
+        # 시범 영상 플레이스홀더
+        st.markdown("""
+        <div style='text-align: center; padding: 2rem; background: #e8f4f8; border-radius: 10px; min-height: 200px; display: flex; align-items: center; justify-content: center; border: 2px solid #667eea;'>
+            <div>
+                <div style='font-size: 3rem; margin-bottom: 1rem;'>🎬</div>
+                <p style='color: #667eea; font-weight: bold;'>전문가 시범 영상</p>
+                <p style='color: #888; font-size: 0.9rem;'>5초 시범 동작</p>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown("### 📹 내 웹캠")
         
         # 웹캠 시작/정지 버튼
         if st.button("📷 웹캠 시작", key="start_webcam", use_container_width=True):
@@ -675,18 +704,21 @@ def dance_page():
         
         # 시뮬레이션용 - 실제로는 웹캠 피드를 여기에 표시
         webcam_placeholder.markdown("""
-        <div style='text-align: center; padding: 2rem; background: #f0f0f0; border-radius: 10px; min-height: 300px; display: flex; align-items: center; justify-content: center;'>
+        <div style='text-align: center; padding: 2rem; background: #f0f0f0; border-radius: 10px; min-height: 200px; display: flex; align-items: center; justify-content: center; border: 2px dashed #ccc;'>
             <div>
                 <div style='font-size: 3rem; margin-bottom: 1rem;'>📷</div>
-                <p style='color: #666;'>웹캠 영역</p>
-                <p style='color: #888; font-size: 0.9rem;'>실제 구현시 실시간 포즈 감지</p>
+                <p style='color: #666; font-weight: bold;'>사용자 웹캠</p>
+                <p style='color: #888; font-size: 0.9rem;'>실시간 포즈 감지</p>
             </div>
         </div>
         """, unsafe_allow_html=True)
     
-    with col2:
-        st.markdown("### 🎯 동작 체크")
-        
+    # 동작 체크 영역
+    st.markdown("### 🎯 동작 체크")
+    
+    col3, col4 = st.columns([1, 1])
+    
+    with col3:
         # 동작 시도 버튼 (시뮬레이션용)
         if st.button("✨ 동작 확인", key="check_pose", use_container_width=True, type="primary"):
             # 시뮬레이션: 랜덤하게 성공/실패 결정
@@ -724,7 +756,8 @@ def dance_page():
                         st.rerun()
                 else:
                     st.error(f"😅 다시 시도해보세요! ({3 - st.session_state.pose_attempts}번 더 가능)")
-        
+    
+    with col4:
         # 동작 스킵 버튼
         if st.button("⏭️ 다음 동작", key="skip_pose", use_container_width=True):
             if st.session_state.current_pose < len(korean_poses) - 1:
@@ -777,13 +810,15 @@ def meme_page():
     if st.session_state.dna_type:
         dna_info = dna_types[st.session_state.dna_type]
         st.markdown(f"""
-        <div style='text-align: center; padding: 2.5rem; background: {dna_info['color']}55; border-radius: 15px; margin: 2rem 0; border: 3px solid {dna_info['color']}88; box-shadow: 0 4px 8px rgba(0,0,0,0.1);'>
-            <h3 style='margin: 0 0 1rem 0; color: #111; font-weight: bold; font-size: 1.3rem; text-shadow: 1px 1px 2px rgba(255,255,255,0.8);'>🧬 당신의 춤 DNA</h3>
-            <h2 style='margin: 0 0 1.5rem 0; color: #000; font-weight: bold; font-size: 1.8rem; text-shadow: 1px 1px 2px rgba(255,255,255,0.9);'>{dna_info['name']}</h2>
-            <p style='margin: 0 0 1.5rem 0; color: #222; font-size: 1.1rem; font-weight: 500; line-height: 1.5; text-shadow: 0.5px 0.5px 1px rgba(255,255,255,0.8);'>{dna_info['description']}</p>
-            <p style='margin: 0; color: #333; font-size: 1rem; font-weight: bold; text-shadow: 0.5px 0.5px 1px rgba(255,255,255,0.7);'>
-                완료한 동작: {st.session_state.current_pose + 1}/{len(korean_poses)}개
-            </p>
+        <div style='text-align: center; padding: 2.5rem; background: white; border-radius: 15px; margin: 2rem 0; border: 4px solid {dna_info['color']}; box-shadow: 0 8px 16px rgba(0,0,0,0.15);'>
+            <h3 style='margin: 0 0 1rem 0; color: {dna_info['color']}; font-weight: bold; font-size: 1.3rem;'>🧬 당신의 춤 DNA</h3>
+            <h2 style='margin: 0 0 1.5rem 0; color: #333; font-weight: bold; font-size: 1.8rem;'>{dna_info['name']}</h2>
+            <p style='margin: 0 0 1.5rem 0; color: #666; font-size: 1.1rem; font-weight: 500; line-height: 1.5; background: #f8f9fa; padding: 1rem; border-radius: 8px;'>{dna_info['description']}</p>
+            <div style='background: {dna_info['color']}22; padding: 1rem; border-radius: 8px; border: 2px solid {dna_info['color']}66;'>
+                <p style='margin: 0; color: #333; font-size: 1rem; font-weight: bold;'>
+                    완료한 동작: {st.session_state.current_pose + 1}/{len(korean_poses)}개
+                </p>
+            </div>
         </div>
         """, unsafe_allow_html=True)
     
