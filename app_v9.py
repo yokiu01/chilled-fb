@@ -37,7 +37,9 @@ if not st.session_state.authenticated:
     with col2:
         password = st.text_input("🔐 비밀번호", type="password", placeholder="비밀번호 입력")
         if st.button("입장하기", type="primary", use_container_width=True):
-            if password == "choomaru2025":
+            # Streamlit Secrets에서 비밀번호 가져오기
+            correct_password = st.secrets.get("password", "choomaru2025")
+            if password == correct_password:
                 st.session_state.authenticated = True
                 st.rerun()
             else:
