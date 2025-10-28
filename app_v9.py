@@ -1,0 +1,2903 @@
+# 춤마루 MVP v9 Streamlit (2025.10.28)
+# v9: 한국어/영어 다국어 지원 (사이드바 언어 선택)
+# 완전한 Streamlit 구현 버전 - 10개 질문, 8개 DNA 타입, 12개 기본동작, 6개 확장동작, 8개 창작동작 포함
+# 확장/창작 동작에도 웹캠 및 상세 설명 추가, 동작 배우기 페이지 개선
+# 밈 템플릿: DNA 영상 배경 + 텍스트 외곽선 효과 + 다운로드 기능
+# GIF 밈 생성: 2-3초 움직이는 밈 카드 (소셜 미디어 최적화)
+# MediaPipe 실제 구현, 영상 업로드 지원, 웹캠 동작 인식 기능
+
+import streamlit as st
+import cv2
+import numpy as np
+import mediapipe as mp
+from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageFilter
+import json
+import time
+import random
+import io
+
+# ==================== 비밀번호 인증 ====================
+# 페이지 설정을 먼저 해야 함
+st.set_page_config(page_title="춤마루 (Choomaru)", page_icon="💃", layout="wide")
+
+# 인증 확인
+if 'authenticated' not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    st.markdown("""
+    <div style='text-align: center; padding: 3rem;'>
+        <h1>🎭 춤마루 (Choomaru)</h1>
+        <h3>K-DNA 각성 프로젝트</h3>
+        <p style='color: #666; margin-top: 1rem;'>비밀번호를 입력하여 접속하세요</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        password = st.text_input("🔐 비밀번호", type="password", placeholder="비밀번호 입력")
+        if st.button("입장하기", type="primary", use_container_width=True):
+            if password == "choomaru2025":
+                st.session_state.authenticated = True
+                st.rerun()
+            else:
+                st.error("❌ 잘못된 비밀번호입니다")
+    st.stop()
+
+# ==================== 다국어 지원 ====================
+# 언어 딕셔너리
+TRANSLATIONS = {
+    'ko': {
+        # 공통
+        'app_title': '춤마루',
+        'app_subtitle': '당신 안에 잠든 K-DNA, 지금 깨어나다',
+        'btn_home': '🏠 홈',
+        'btn_prev': '← 이전',
+        'btn_next': '다음',
+        'progress': '진행률',
+        
+        # Journey 단계
+        'journey_1_title': 'K-DNA 발견',
+        'journey_1_desc': '10개 질문으로 나만의 춤 성향 분석',
+        'journey_2_title': '전통 움직임 체험',
+        'journey_2_desc': '한국무용 기본동작 12가지 완주',
+        'journey_3_title': '5000년 이야기',
+        'journey_3_desc': '전통 속에 숨겨진 깊은 철학 탐구',
+        'journey_4_title': 'K-DNA 카드 생성',
+        'journey_4_desc': '나만의 춤 정체성을 SNS로 공유',
+        
+        # 랜딩 페이지
+        'landing_hero': '5000년 흘러온 움직임이 드디어 내 몸에서 시작된다',
+        'landing_desc': '10가지 일상 질문으로 나만의 춤 DNA를 발견하고,<br>세계가 열광하는 K-무브먼트의 진짜 뿌리를 경험하세요',
+        'landing_journey': '춤마루 여정',
+        'landing_start': '내 K-DNA 깨우기',
+        'landing_stats': '이미 2,347명이 자신만의 춤 유전자를 발견했습니다',
+        
+        # 테스트 페이지
+        'question': '질문',
+        'select_answer': '답변을 선택해주세요:',
+        'dna_forming': '당신만의 K-DNA가 선명해지고 있어요',
+        
+        # 결과 페이지
+        'your_dna': '당신의 춤 DNA',
+        'your_traits': '당신의 특징',
+        'expert_video': '맞춤 전통무용 시연',
+        'start_movement': '이제 움직임으로 깨워보기',
+        'share_result': '결과 공유하기',
+        
+        # 동작 선택 페이지
+        'movement_journey': '움직임 여정 시작',
+        'movement_subtitle': '한국무용의 숨겨진 DNA를 깨워보세요',
+        'basic_actions': '기본 동작',
+        'basic_actions_desc': '한국무용의 핵심 미학을 담은 필수 동작들. 5000년 전통의 움직임 언어를 현대적으로 경험해보세요.',
+        'expanded_actions': '확장 동작',
+        'expanded_actions_desc': '기본기를 응용한 고급 동작들. 더욱 섬세한 표현력을 경험할 수 있습니다.',
+        'creative_actions': '창작 동작',
+        'creative_actions_desc': '전통을 현대적으로 재해석한 창작 동작들. K-Culture의 미래를 체험해보세요.',
+        'start_basic': '기본 동작 시작하기',
+        'try_expanded': '확장 동작 체험하기',
+        'try_creative': '창작 동작 체험하기',
+        'see_story': '📖 5000년 움직임의 비밀 먼저 보기',
+        'story_title': '5000년 움직임의 비밀',
+        'story_subtitle': '한국무용에 담긴 깊은 철학',
+        'view_detail': '자세히 보기',
+        'try_now': '이제 직접 체험해보기',
+        'seconds': '초',
+        'historical_background': '역사적 배경',
+        'badge_earned': '배지 획득!',
+        'ai_support': 'AI 동작 분석 지원',
+        'special_meme': '완주시 특별 밈 생성',
+        'expert_video': '전문가 영상 제공',
+        'ai_coming': '2026년 6월 AI 분석 지원',
+        'press_button_first': '먼저 \'🎬 GIF 생성하기\' 버튼을 눌러주세요',
+        
+        # 동작 페이지
+        'expert_demo': '전문가 시범',
+        'your_movement': '당신의 동작',
+        'webcam_guide': '웹캠으로 동작을 따라해보세요',
+        'action_complete_manual': '동작 완료 (수동)',
+        'ai_judgement': '실제 앱에서는 AI가 자동 판정',
+        'pose_not_detected': '자세를 인식할 수 없습니다. 전신이 보이도록 해주세요.',
+        'all_complete': '🎉 모든 동작을 완료했습니다!',
+        'back_to_select': '동작 선택으로 돌아가기',
+        
+        # 밈 페이지
+        'dna_awakened': 'K-DNA 각성 완료!',
+        'actions_completed': '개 동작 완료!',
+        'awakened_msg': '당신만의 춤 유전자가 깨어났습니다',
+        'share_journey': '지금까지의 여정을 공유해보세요',
+        'meme_type': '🎨 밈 카드 유형 선택',
+        'static_image': '정적 이미지 (PNG)',
+        'animated_gif': '움직이는 GIF (2-3초)',
+        'select_style': '원하는 스타일을 선택하세요',
+        'style_a': '스타일 A: 그라데이션 박스 (상단/하단 텍스트, 가독성 최고)',
+        'style_b': '스타일 B: 네온 스타일 (형광 색상, K-pop 감성)',
+        'style_c': '스타일 C: 듀얼 톤 (보라+핑크 컬러 필터, 인스타 감성)',
+        'style_d': '스타일 D: 미니멀 (심플 깔끔, 좌측 정렬)',
+        'download_png': '📱 PNG 다운로드',
+        'download_gif': '🎬 GIF 다운로드',
+        'generate_gif': '🎬 GIF 생성하기',
+        'share_guide': '📤 SNS 공유 가이드',
+        'gif_length': 'GIF 길이 (초)',
+        'gif_style': 'GIF 스타일',
+        'new_dna': '🔄 새로운 DNA 탐험하기',
+        'continue_actions': '➡️ 계속 동작 익히기',
+        'see_stories': '📖 전통 이야기 보기',
+        
+        # DNA 타입 이름
+        'dna_meme_master': '밈 장인',
+        'dna_mood_curator': '무드 큐레이터',
+        'dna_perfect_planner': '갓생 플래너',
+        'dna_detail_artisan': '디테일 장인',
+        'dna_emotional_filter': '감성 필터',
+        'dna_human_resonator': '인간 공명기',
+        'dna_party_hero': '파티 히어로',
+        'dna_fun_exploder': '흥 폭발러',
+        
+        # 밈 카드 텍스트
+        'meme_i_am': '나는',
+        'meme_hashtag': '#춤마루 #K_DNA각성',
+        
+        # 밈 페이지
+        'view_dna_result': '🧬 DNA 결과',
+        'practice_movement': '💃 동작 연습',
+        'meme_format': '밈 형식',
+        'static_image': '정적 이미지 (PNG)',
+        'animated_gif': '움직이는 GIF (2-3초)',
+        'gif_duration': 'GIF 길이',
+        'gif_style': 'GIF 스타일',
+        'create_gif': '🎬 GIF 생성하기',
+        'download_meme': '💾 밈 다운로드',
+        'earned_badges': '획득한 배지',
+        'badge_name': '배지명',
+        'style_gradient': '스타일 A: 그라데이션 박스',
+        'style_neon': '스타일 B: 네온 스타일',
+        'style_dualtone': '스타일 C: 듀얼 톤',
+        'style_minimal': '스타일 D: 미니멀',
+        'congrats_title': '🎉 축하합니다!',
+        'congrats_complete': '당신은 12가지 기본 동작을 모두 완료했습니다!',
+        'congrats_dna': '당신의 K-DNA가 완전히 각성되었습니다.',
+        'congrats_share': '밈을 다운로드해서 친구들과 공유해보세요!',
+        'success_full': '축하합니다! 한국무용의 12가지 기본 동작을 모두 완주하셨습니다. 당신은 이제 진정한 K-DNA 마스터입니다. 5000년 전통의 움직임이 당신 안에서 살아 숨쉬고 있어요.',
+        'success_partial': '잘하고 있어요! 이미 {count}개의 동작을 마스터했습니다. 계속해서 나만의 춤 DNA를 깨워나가고 있어요.',
+    },
+    'en': {
+        # Common
+        'app_title': 'Choomaru',
+        'app_subtitle': 'Awaken the K-DNA within you',
+        'btn_home': '🏠 Home',
+        'btn_prev': '← Back',
+        'btn_next': 'Next',
+        'progress': 'Progress',
+        
+        # Journey Steps
+        'journey_1_title': 'Discover K-DNA',
+        'journey_1_desc': 'Analyze your dance personality through 10 questions',
+        'journey_2_title': 'Experience Traditional Movement',
+        'journey_2_desc': 'Complete 12 basic Korean dance movements',
+        'journey_3_title': '5000 Years of Stories',
+        'journey_3_desc': 'Explore deep philosophy hidden in tradition',
+        'journey_4_title': 'Create K-DNA Card',
+        'journey_4_desc': 'Share your unique dance identity on SNS',
+        
+        # Landing Page
+        'landing_hero': '5000 Years of Movement, Now Starting in Your Body',
+        'landing_desc': 'Discover your unique dance DNA through 10 everyday questions,<br>and experience the true roots of K-Movement that the world is passionate about',
+        'landing_journey': 'Choomaru Journey',
+        'landing_start': 'Awaken My K-DNA',
+        'landing_stats': 'Already 2,347 people have discovered their unique dance genes',
+        
+        # Test Page
+        'question': 'Question',
+        'select_answer': 'Please select your answer:',
+        'dna_forming': 'Your unique K-DNA is becoming clearer',
+        
+        # Result Page
+        'your_dna': 'Your Dance DNA',
+        'your_traits': 'Your Characteristics',
+        'expert_video': 'Customized Traditional Dance Performance',
+        'start_movement': 'Now Awaken Through Movement',
+        'share_result': 'Share Results',
+        
+        # Action Select Page
+        'movement_journey': 'Begin Movement Journey',
+        'movement_subtitle': 'Awaken the hidden DNA of Korean dance',
+        'basic_actions': 'Basic Actions',
+        'basic_actions_desc': 'Essential movements containing the core aesthetics of Korean dance. Experience 5000 years of movement language in a modern way.',
+        'expanded_actions': 'Expanded Actions',
+        'expanded_actions_desc': 'Advanced movements applying the basics. Experience more delicate expressiveness.',
+        'creative_actions': 'Creative Actions',
+        'creative_actions_desc': 'Creative movements reinterpreting tradition in a modern way. Experience the future of K-Culture.',
+        'start_basic': 'Start Basic Actions',
+        'try_expanded': 'Try Expanded Actions',
+        'try_creative': 'Try Creative Actions',
+        'see_story': '📖 Explore 5000 Years of Movement Secrets First',
+        'story_title': '5000 Years of Movement Secrets',
+        'story_subtitle': 'Deep Philosophy in Korean Dance',
+        'view_detail': 'View Details',
+        'try_now': 'Experience It Yourself Now',
+        'seconds': 'sec',
+        'historical_background': 'Historical Background',
+        'badge_earned': 'Badge Earned!',
+        'ai_support': 'AI motion analysis support',
+        'special_meme': 'Special meme upon completion',
+        'expert_video': 'Expert video provided',
+        'ai_coming': 'AI analysis support coming June 2026',
+        'press_button_first': 'Please press the \'🎬 Create GIF\' button first',
+        
+        # Action Page
+        'expert_demo': 'Expert Demonstration',
+        'your_movement': 'Your Movement',
+        'webcam_guide': 'Follow the movement with your webcam',
+        'action_complete_manual': 'Complete Action (Manual)',
+        'ai_judgement': 'AI will auto-judge in the actual app',
+        'pose_not_detected': 'Cannot detect pose. Please ensure full body is visible.',
+        'all_complete': '🎉 All actions completed!',
+        'back_to_select': 'Back to Action Selection',
+        
+        # Meme Page
+        'dna_awakened': 'K-DNA Awakening Complete!',
+        'actions_completed': ' actions completed!',
+        'awakened_msg': 'Your unique dance gene has awakened',
+        'share_journey': 'Share your journey so far',
+        'meme_type': '🎨 Select Meme Card Type',
+        'static_image': 'Static Image (PNG)',
+        'animated_gif': 'Animated GIF (2-3 sec)',
+        'select_style': 'Select your preferred style',
+        'style_a': 'Style A: Gradient Box (Top/Bottom text, Best readability)',
+        'style_b': 'Style B: Neon Style (Fluorescent colors, K-pop vibe)',
+        'style_c': 'Style C: Dual Tone (Purple+Pink color filter, Instagram vibe)',
+        'style_d': 'Style D: Minimal (Simple & clean, Left aligned)',
+        'download_png': '📱 Download PNG',
+        'download_gif': '🎬 Download GIF',
+        'generate_gif': '🎬 Generate GIF',
+        'share_guide': '📤 SNS Sharing Guide',
+        'gif_length': 'GIF Length (sec)',
+        'gif_style': 'GIF Style',
+        'new_dna': '🔄 Explore New DNA',
+        'continue_actions': '➡️ Continue Learning Actions',
+        'see_stories': '📖 View Traditional Stories',
+        
+        # DNA Type Names
+        'dna_meme_master': 'Meme Master',
+        'dna_mood_curator': 'Mood Curator',
+        'dna_perfect_planner': 'Perfect Planner',
+        'dna_detail_artisan': 'Detail Artisan',
+        'dna_emotional_filter': 'Emotional Filter',
+        'dna_human_resonator': 'Human Resonator',
+        'dna_party_hero': 'Party Hero',
+        'dna_fun_exploder': 'Fun Exploder',
+        
+        # Meme Card Text
+        'meme_i_am': "I'm a",
+        'meme_hashtag': '#Choomaru #K_DNA_Awakening',
+        
+        # Meme Page
+        'view_dna_result': '🧬 DNA Result',
+        'practice_movement': '💃 Practice Movement',
+        'meme_format': 'Meme Format',
+        'static_image': 'Static Image (PNG)',
+        'animated_gif': 'Animated GIF (2-3 sec)',
+        'gif_duration': 'GIF Duration',
+        'gif_style': 'GIF Style',
+        'create_gif': '🎬 Create GIF',
+        'download_meme': '💾 Download Meme',
+        'earned_badges': 'Earned Badges',
+        'badge_name': 'Badge Name',
+        'style_gradient': 'Style A: Gradient Box',
+        'style_neon': 'Style B: Neon',
+        'style_dualtone': 'Style C: Dual Tone',
+        'style_minimal': 'Style D: Minimal',
+        'congrats_title': '🎉 Congratulations!',
+        'congrats_complete': 'You have completed all 12 basic movements!',
+        'congrats_dna': 'Your K-DNA has been fully awakened.',
+        'congrats_share': 'Download your meme and share it with friends!',
+        'success_full': 'Congratulations! You have completed all 12 basic Korean dance movements. You are now a true K-DNA master. 5000 years of traditional movement lives and breathes within you.',
+        'success_partial': 'Great job! You have already mastered {count} movements. Keep awakening your unique dance DNA.',
+    }
+}
+
+# 번역 헬퍼 함수
+def t(key, lang=None):
+    """언어에 맞는 번역 텍스트 반환"""
+    if lang is None:
+        lang = st.session_state.get('language', 'ko')
+    return TRANSLATIONS.get(lang, {}).get(key, key)
+
+# CSS 스타일링
+st.markdown("""
+<style>
+    .main > div {
+        padding-top: 2rem;
+    }
+    .stButton > button {
+        width: 100%;
+        border-radius: 20px;
+        border: none;
+        padding: 0.5rem 1rem;
+        font-weight: 600;
+        transition: all 0.3s;
+    }
+    .dna-card {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 2rem;
+        border-radius: 20px;
+        color: white;
+        text-align: center;
+        margin: 1rem 0;
+    }
+    .action-card {
+        background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+        padding: 1.5rem;
+        border-radius: 15px;
+        color: white;
+        margin: 1rem 0;
+    }
+    .success-message {
+        background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        padding: 1rem;
+        border-radius: 10px;
+        color: white;
+        text-align: center;
+    }
+    .journey-step {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 1rem;
+        border-radius: 10px;
+        color: white;
+        margin: 0.5rem 0;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# 세션 상태 초기화
+def init_session_state():
+    if 'language' not in st.session_state:
+        st.session_state.language = 'ko'  # 기본 언어: 한국어
+    if 'current_step' not in st.session_state:
+        st.session_state.current_step = 'landing'
+    if 'answers' not in st.session_state:
+        st.session_state.answers = []
+    if 'current_question' not in st.session_state:
+        st.session_state.current_question = 0
+    if 'dna_result' not in st.session_state:
+        st.session_state.dna_result = None
+    if 'completed_actions' not in st.session_state:
+        st.session_state.completed_actions = []
+    if 'current_action' not in st.session_state:
+        st.session_state.current_action = 0
+    if 'current_expanded_action' not in st.session_state:
+        st.session_state.current_expanded_action = 0
+    if 'current_creative_action' not in st.session_state:
+        st.session_state.current_creative_action = 0
+    if 'current_story' not in st.session_state:
+        st.session_state.current_story = 0
+    if 'badges' not in st.session_state:
+        st.session_state.badges = []
+    if 'consecutive_success' not in st.session_state:
+        st.session_state.consecutive_success = 0
+
+# 10개 질문 데이터 (한국어)
+questions_ko = [
+    {
+        "id": 1,
+        "text": "새로운 여행지를 탐험할 때, 당신은 어떤 사람인가요?",
+        "options": {
+            "A": "아무도 모르는 숨은 장소를 찾아 나서는 탐험가",
+            "B": "이동 경로와 맛집까지 완벽하게 계획하는 플래너", 
+            "C": "풍경 하나하나에 담긴 스토리를 상상하는 낭만가",
+            "D": "현지 축제나 파티에 무작정 참여하는 분위기 메이커"
+        }
+    },
+    {
+        "id": 2,
+        "text": "예상치 못한 문제가 발생했을 때, 당신의 반응은?",
+        "options": {
+            "A": "남들이 생각하지 못한 독창적 아이디어로 해결한다",
+            "B": "가장 논리적이고 효율적인 해결책을 찾는다",
+            "C": "문제의 원인과 과정을 되짚어보며 자신을 돌아본다", 
+            "D": "'다 같이 힘내자!'고 외치며 긍정 에너지를 불어넣는다"
+        }
+    },
+    {
+        "id": 3,
+        "text": "쇼핑을 할 때 당신의 취향은?",
+        "options": {
+            "A": "유행에 휩쓸리지 않고 나만의 독특한 스타일을 찾는다",
+            "B": "기능성과 실용성을 꼼꼼히 따져보고 구매한다",
+            "C": "이 물건이 나에게 어떤 의미를 줄지 상상하며 쇼핑한다",
+            "D": "화려한 색상과 과감한 디자인으로 시선을 사로잡는다"
+        }
+    },
+    {
+        "id": 4,
+        "text": "당신이 가장 중요하게 생각하는 것은?",
+        "options": {
+            "A": "아무도 가보지 않은 길을 개척하는 자유로움",
+            "B": "흔들림 없이 내 삶을 완벽하게 통제하는 것",
+            "C": "타인과 깊은 감정을 교류하고 공감하는 것",
+            "D": "주변 사람들에게 활기와 긍정적 에너지를 주는 것"
+        }
+    },
+    {
+        "id": 5,
+        "text": "휴대폰 앨범에 가장 많은 사진은?",
+        "options": {
+            "A": "직접 찍은 독특한 풍경이나 예술 작품",
+            "B": "정리된 계획표나 중요한 정보 캡처",
+            "C": "소중한 사람들과의 추억이 담긴 사진",
+            "D": "파티나 콘서트 등 흥겨운 현장 분위기"
+        }
+    },
+    {
+        "id": 6,
+        "text": "고민을 털어놓는 친구에게 당신의 반응은?",
+        "options": {
+            "A": "'나라면 이렇게 해볼 것 같아'라며 새로운 해결책 제안",
+            "B": "'왜 그런 문제가 생겼지?'라며 원인 분석과 논리적 조언",
+            "C": "'얼마나 힘들었을까'라며 공감하고 마음을 어루만짐",
+            "D": "'일단 맛있는 거 먹고 힘내자!'라며 분위기 전환"
+        }
+    },
+    {
+        "id": 7,
+        "text": "좋아하는 SNS 콘텐츠는?",
+        "options": {
+            "A": "창의적인 아이디어가 돋보이는 숏폼 챌린지",
+            "B": "전문가가 정확한 정보를 알려주는 콘텐츠",
+            "C": "감성적인 분위기와 스토리텔링이 있는 다큐",
+            "D": "활발한 소통과 재미있는 에피소드의 라이브 방송"
+        }
+    },
+    {
+        "id": 8,
+        "text": "혼자 있을 때 주로 하는 것은?",
+        "options": {
+            "A": "그림을 그리거나 글을 쓰는 등 창작 활동",
+            "B": "평소 미뤄뒀던 일들을 체계적으로 정리",
+            "C": "영화나 책을 보며 주인공의 감정에 깊이 몰입",
+            "D": "신나는 음악을 들으며 아무 생각 없이 몸을 움직임"
+        }
+    },
+    {
+        "id": 9,
+        "text": "옷장에 가장 많은 스타일은?",
+        "options": {
+            "A": "남들이 잘 입지 않는 독특하고 개성 있는 옷",
+            "B": "깔끔하고 단정하며 어디에나 어울리는 기본 아이템",
+            "C": "부드러운 소재와 편안한 핏으로 감성을 자극하는 옷",
+            "D": "밝고 화사한 컬러로 에너지가 넘치는 옷"
+        }
+    },
+    {
+        "id": 10,
+        "text": "당신에게 완벽한 하루란?",
+        "options": {
+            "A": "머릿속에 떠오른 아이디어를 마음껏 펼친 하루",
+            "B": "계획한 일을 모두 완벽하게 해낸 하루",
+            "C": "소중한 사람들과 깊은 대화를 나눈 하루",
+            "D": "온몸으로 즐기며 스트레스를 날려버린 하루"
+        }
+    }
+]
+
+# 10개 질문 데이터 (영어)
+questions_en = [
+    {
+        "id": 1,
+        "text": "When exploring a new travel destination, what kind of person are you?",
+        "options": {
+            "A": "An explorer seeking hidden places no one knows about",
+            "B": "A planner perfectly organizing routes and restaurants",
+            "C": "A romantic imagining stories behind every scenery",
+            "D": "A mood-maker spontaneously joining local festivals or parties"
+        }
+    },
+    {
+        "id": 2,
+        "text": "When an unexpected problem occurs, your reaction is?",
+        "options": {
+            "A": "Solve it with creative ideas others haven't thought of",
+            "B": "Find the most logical and efficient solution",
+            "C": "Reflect on the cause and process while looking inward",
+            "D": "Shout 'Let's all do our best!' and inject positive energy"
+        }
+    },
+    {
+        "id": 3,
+        "text": "What's your taste when shopping?",
+        "options": {
+            "A": "Find your unique style without following trends",
+            "B": "Carefully check functionality and practicality before buying",
+            "C": "Shop while imagining what meaning this item will bring",
+            "D": "Catch attention with vibrant colors and bold designs"
+        }
+    },
+    {
+        "id": 4,
+        "text": "What do you value most?",
+        "options": {
+            "A": "Freedom to pioneer paths no one has taken",
+            "B": "Perfectly controlling my life without wavering",
+            "C": "Exchanging deep emotions and empathizing with others",
+            "D": "Giving vitality and positive energy to people around me"
+        }
+    },
+    {
+        "id": 5,
+        "text": "What photos fill your phone album the most?",
+        "options": {
+            "A": "Unique landscapes or artworks I've taken myself",
+            "B": "Organized schedules or important information captures",
+            "C": "Photos filled with memories of precious people",
+            "D": "Exciting atmosphere from parties or concerts"
+        }
+    },
+    {
+        "id": 6,
+        "text": "When a friend shares their worries, your reaction is?",
+        "options": {
+            "A": "'If it were me, I'd try this' - suggesting new solutions",
+            "B": "'Why did this problem occur?' - analyzing causes and giving logical advice",
+            "C": "'How hard it must have been' - empathizing and comforting",
+            "D": "'Let's eat something delicious and cheer up!' - changing the mood"
+        }
+    },
+    {
+        "id": 7,
+        "text": "What SNS content do you prefer?",
+        "options": {
+            "A": "Short-form challenges with creative ideas",
+            "B": "Content where experts provide accurate information",
+            "C": "Documentaries with emotional atmosphere and storytelling",
+            "D": "Live broadcasts with active communication and fun episodes"
+        }
+    },
+    {
+        "id": 8,
+        "text": "What do you mainly do when alone?",
+        "options": {
+            "A": "Creative activities like drawing or writing",
+            "B": "Systematically organizing postponed tasks",
+            "C": "Deeply immersing in characters' emotions through movies or books",
+            "D": "Moving my body freely while listening to exciting music"
+        }
+    },
+    {
+        "id": 9,
+        "text": "What style fills your wardrobe the most?",
+        "options": {
+            "A": "Unique and individual clothes people don't wear often",
+            "B": "Clean and neat basic items that go anywhere",
+            "C": "Clothes with soft materials and comfortable fit that touch emotions",
+            "D": "Bright and colorful clothes overflowing with energy"
+        }
+    },
+    {
+        "id": 10,
+        "text": "What's a perfect day for you?",
+        "options": {
+            "A": "A day freely expressing ideas that came to mind",
+            "B": "A day perfectly accomplishing all planned tasks",
+            "C": "A day having deep conversations with precious people",
+            "D": "A day enjoying with my whole body and blowing away stress"
+        }
+    }
+]
+
+# 언어에 따라 질문 선택
+def get_questions(lang='ko'):
+    return questions_ko if lang == 'ko' else questions_en
+
+questions = questions_ko  # 기본값
+
+# 8가지 DNA 타입 정의 (한국어)
+dna_types_ko = {
+    "밈 장인": {
+        "emoji": "🎭",
+        "title": "Meme Master",
+        "description": "일상에서 영감을 받아 춤으로 즉흥적인 콘텐츠를 만들어내는 당신. 기발한 아이디어와 엉뚱한 동작 조합으로 '이게 되네?' 싶은 춤을 창조합니다.",
+        "characteristics": ["창의적 발상", "즉흥성", "유머 감각", "콘텐츠 크리에이터"],
+        "color": "#FF6B35",
+        "video_file": "dna-types/meme-master.mp4"
+    },
+    "무드 큐레이터": {
+        "emoji": "✨",
+        "title": "Mood Curator", 
+        "description": "분위기 좋은 음악이 흘러나오면 곧바로 자신만의 감성을 담은 춤을 추는 당신. 춤의 완성도보다는 그 순간의 느낌과 분위기를 소중히 여깁니다.",
+        "characteristics": ["감성적", "분위기 메이커", "예술적 감각", "순간 포착"],
+        "color": "#A8E6CF",
+        "video_file": "dna-types/mood-curator.mp4"
+    },
+    "갓생 플래너": {
+        "emoji": "📋",
+        "title": "Perfect Planner",
+        "description": "춤을 추기 전에 모든 동작을 머릿속으로 시뮬레이션하고 완벽한 각도와 동선을 계산하는 당신. '갓생'을 살 듯 춤도 빈틈없이 계획적으로 춥니다.",
+        "characteristics": ["완벽주의", "체계적", "목표 지향", "효율성"],
+        "color": "#4ECDC4",
+        "video_file": "dna-types/perfect-planner.mp4"
+    },
+    "디테일 장인": {
+        "emoji": "🔍",
+        "title": "Detail Artisan",
+        "description": "남들이 놓치는 미세한 손끝의 떨림이나 발끝의 각도까지 신경 쓰는 완벽주의자. 작은 디테일로 춤에 깊이를 더하고 보는 사람에게 감동을 선사합니다.",
+        "characteristics": ["섬세함", "정밀성", "장인정신", "품질 추구"],
+        "color": "#B8860B",
+        "video_file": "dna-types/detail-artisan.mp4"
+    },
+    "감성 필터": {
+        "emoji": "💫",
+        "title": "Emotional Filter",
+        "description": "기쁨, 슬픔, 분노 등 모든 감정을 춤으로 표현하는 당신. 춤이 곧 감정 일기이며, 타인과 감정을 교류하는 통로라고 생각합니다.",
+        "characteristics": ["감정 표현", "내면 탐구", "예술성", "치유력"],
+        "color": "#DDA0DD",
+        "video_file": "dna-types/emotional-filter.mp4"
+    },
+    "인간 공명기": {
+        "emoji": "🤝",
+        "title": "Human Resonator",
+        "description": "타인의 감정이나 분위기에 민감하게 반응하고, 춤을 통해 그 감정에 공감하는 당신. 모두와 함께 춤을 추며 소통하는 것에 가장 큰 즐거움을 느낍니다.",
+        "characteristics": ["공감 능력", "소통", "화합", "감정 동조"],
+        "color": "#FF69B4",
+        "video_file": "dna-types/human-resonator.mp4"
+    },
+    "파티 히어로": {
+        "emoji": "🎉",
+        "title": "Party Hero",
+        "description": "춤추는 순간 주위 사람들의 시선을 사로잡는 분위기 메이커. 신나는 음악과 함께 모든 에너지를 쏟아내며, 춤으로 파티의 열기를 최고조로 끌어올립니다.",
+        "characteristics": ["리더십", "에너지", "사교성", "무대 장악력"],
+        "color": "#FFD700",
+        "video_file": "dna-types/party-hero.mp4"
+    },
+    "흥 폭발러": {
+        "emoji": "🚀",
+        "title": "Fun Exploder",
+        "description": "어디서든 춤을 통해 긍정적인 에너지를 발산하는 당신. 춤을 배우는 것보다 그저 신나게 즐기는 것에 더 큰 의미를 두는 유형입니다.",
+        "characteristics": ["자유분방", "열정", "긍정성", "에너지 전달"],
+        "color": "#FF4500",
+        "video_file": "dna-types/fun-exploder.mp4"
+    }
+}
+
+# 8가지 DNA 타입 정의 (영어)
+dna_types_en = {
+    "Meme Master": {
+        "emoji": "🎭",
+        "title": "Meme Master",
+        "description": "Inspired by daily life, you create spontaneous dance content. With brilliant ideas and quirky movement combinations, you create dances that make people think 'This actually works?'",
+        "characteristics": ["Creative Thinking", "Spontaneity", "Sense of Humor", "Content Creator"],
+        "color": "#FF6B35",
+        "video_file": "dna-types/meme-master.mp4"
+    },
+    "Mood Curator": {
+        "emoji": "✨",
+        "title": "Mood Curator",
+        "description": "When good music plays, you immediately dance with your own sensibility. You value the feeling and atmosphere of the moment more than dance perfection.",
+        "characteristics": ["Emotional", "Mood Maker", "Artistic Sense", "Moment Capture"],
+        "color": "#A8E6CF",
+        "video_file": "dna-types/mood-curator.mp4"
+    },
+    "Perfect Planner": {
+        "emoji": "📋",
+        "title": "Perfect Planner",
+        "description": "Before dancing, you simulate every movement in your mind and calculate perfect angles and movement lines. Like living a 'god-life', you dance with thorough planning.",
+        "characteristics": ["Perfectionism", "Systematic", "Goal-Oriented", "Efficiency"],
+        "color": "#4ECDC4",
+        "video_file": "dna-types/perfect-planner.mp4"
+    },
+    "Detail Artisan": {
+        "emoji": "🔍",
+        "title": "Detail Artisan",
+        "description": "A perfectionist who pays attention to subtle fingertip trembles and toe angles that others miss. You add depth to dance with small details and move the audience.",
+        "characteristics": ["Delicacy", "Precision", "Craftsmanship", "Quality Pursuit"],
+        "color": "#B8860B",
+        "video_file": "dna-types/detail-artisan.mp4"
+    },
+    "Emotional Filter": {
+        "emoji": "💫",
+        "title": "Emotional Filter",
+        "description": "You express all emotions through dance - joy, sadness, anger. Dance is your emotional diary and a channel to exchange emotions with others.",
+        "characteristics": ["Emotional Expression", "Inner Exploration", "Artistry", "Healing Power"],
+        "color": "#DDA0DD",
+        "video_file": "dna-types/emotional-filter.mp4"
+    },
+    "Human Resonator": {
+        "emoji": "🤝",
+        "title": "Human Resonator",
+        "description": "Sensitive to others' emotions and atmosphere, you empathize through dance. You find greatest joy in dancing and communicating with everyone.",
+        "characteristics": ["Empathy", "Communication", "Harmony", "Emotional Sync"],
+        "color": "#FF69B4",
+        "video_file": "dna-types/human-resonator.mp4"
+    },
+    "Party Hero": {
+        "emoji": "🎉",
+        "title": "Party Hero",
+        "description": "A mood-maker who captivates people's attention when dancing. With exciting music, you pour out all energy and raise the party's heat to its peak through dance.",
+        "characteristics": ["Leadership", "Energy", "Sociability", "Stage Presence"],
+        "color": "#FFD700",
+        "video_file": "dna-types/party-hero.mp4"
+    },
+    "Fun Exploder": {
+        "emoji": "🚀",
+        "title": "Fun Exploder",
+        "description": "You radiate positive energy through dance anywhere. You find more meaning in simply enjoying energetically than learning dance.",
+        "characteristics": ["Free-spirited", "Passion", "Positivity", "Energy Transfer"],
+        "color": "#FF4500",
+        "video_file": "dna-types/fun-exploder.mp4"
+    }
+}
+
+# DNA 타입 이름 매핑 (한국어 -> 영어)
+dna_type_mapping = {
+    "밈 장인": "Meme Master",
+    "무드 큐레이터": "Mood Curator",
+    "갓생 플래너": "Perfect Planner",
+    "디테일 장인": "Detail Artisan",
+    "감성 필터": "Emotional Filter",
+    "인간 공명기": "Human Resonator",
+    "파티 히어로": "Party Hero",
+    "흥 폭발러": "Fun Exploder"
+}
+
+# 언어에 따라 DNA 타입 데이터 선택
+def get_dna_types(lang='ko'):
+    return dna_types_ko if lang == 'ko' else dna_types_en
+
+def get_dna_type_name(korean_name, lang='ko'):
+    """한국어 DNA 타입 이름을 현재 언어로 변환"""
+    if lang == 'ko':
+        return korean_name
+    else:
+        return dna_type_mapping.get(korean_name, korean_name)
+
+dna_types = dna_types_ko  # 기본값
+
+# 12개 기본 동작 정의 (한국어)
+basic_actions_ko = [
+    {
+        "name": "좌우새",
+        "description": "어깨와 머리를 좌우로 부드럽게 흔드는 머릿짓",
+        "story_card": "작은 흔들림이 파동을 만든다. 내 몸이 파도처럼 흔들리며 춤의 첫 숨결을 열어준다.",
+        "historical_note": "조선 정재에서 '좌우새'는 새가 머리를 좌우로 흔드는 모습을 형상화한 동작입니다.",
+        "video_file": "basic-actions/left-right-flow.mp4"
+    },
+    {
+        "name": "감기", 
+        "description": "팔을 원형으로 휘감으며 연결하는 동작",
+        "story_card": "팔끝이 그리는 원은 흐름의 다리다. 시작과 끝이 이어지며 끊김 없는 리듬이 완성된다.",
+        "historical_note": "원형의 움직임은 동양 철학의 순환 사상을 담고 있으며, 궁중무에서 자주 사용되었습니다.",
+        "video_file": "basic-actions/arm-circle.mp4"
+    },
+    {
+        "name": "손목감기",
+        "description": "손목을 안팎으로 원을 그리며 감아 올리는 동작", 
+        "story_card": "작은 손목에서 큰 에너지가 피어난다. 미세한 움직임이 춤 전체의 결을 바꾼다.",
+        "historical_note": "손목의 미세한 움직임은 한국무용의 섬세함을 보여주는 대표적 요소입니다.",
+        "video_file": "basic-actions/wrist-circle.mp4"
+    },
+    {
+        "name": "머리감기",
+        "description": "머리를 원으로 부드럽게 돌리는 동작",
+        "story_card": "머리의 회전은 시야와 생각을 확장시킨다. 원이 커질수록 마음도 더 넓어진다.",
+        "historical_note": "머리감기는 자연의 흐름에 몸을 맡기는 한국무용의 핵심 철학을 담고 있습니다.",
+        "video_file": "basic-actions/head-circle.mp4"
+    },
+    {
+        "name": "바람불기",
+        "description": "팔과 손을 바람결처럼 흔드는 동작",
+        "story_card": "바람처럼 가볍게, 그러나 보이지 않게 강하게. 손끝에서 세상과 연결되는 길이 열린다.",
+        "historical_note": "자연의 바람을 형상화한 이 동작은 인간과 자연의 조화를 추구하는 우리 문화를 보여줍니다.",
+        "video_file": "basic-actions/wind-blowing.mp4"
+    },
+    {
+        "name": "손바닥 뒤집기", 
+        "description": "손바닥을 위아래로 간단히 뒤집는 동작",
+        "story_card": "뒤집는 순간 세상이 달라진다. 위와 아래가 바뀌며 삶의 관점도 새로워진다.",
+        "historical_note": "음양의 전환을 의미하는 동작으로, 변화와 조화의 철학이 담겨 있습니다.",
+        "video_file": "basic-actions/palm-flip.mp4"
+    },
+    {
+        "name": "홑디딤",
+        "description": "한 발을 내디으며 중심을 옮기는 기본 걸음",
+        "story_card": "단순한 한 발, 그러나 모든 시작은 여기서 열린다. 땅을 딛는 순간 춤은 살아난다.",
+        "historical_note": "한국무용의 모든 이동의 기본이 되는 걸음으로, 안정감과 우아함을 동시에 표현합니다.",
+        "video_file": "basic-actions/single-step.mp4"
+    },
+    {
+        "name": "잔걸음",
+        "description": "작게 바닥을 누르거나 살짝 들어 올리는 걸음",
+        "story_card": "잔걸음은 땅과의 대화다. 무게를 맡기거나 들어 올리며 삶의 무게와 가벼움을 동시에 담는다.",
+        "historical_note": "조심스럽고 절제된 움직임으로 한국 여성의 단아함을 표현하는 대표적 걸음입니다.",
+        "video_file": "basic-actions/small-steps.mp4"
+    },
+    {
+        "name": "굴신",
+        "description": "무릎과 몸통을 굽혔다 펴는 동작", 
+        "story_card": "굽힘과 펼침 속에 인간의 태도가 담긴다. 겸손히 낮추고 당당히 일어서는 몸짓.",
+        "historical_note": "유교 문화의 예의범절이 춤으로 승화된 동작으로, 정중동의 미학을 보여줍니다.",
+        "video_file": "basic-actions/bend-stretch.mp4"
+    },
+    {
+        "name": "한다리들기",
+        "description": "한쪽 다리를 들어 균형을 잡는 동작",
+        "story_card": "흔들림 속에서도 균형을 찾아야 한다. 한다리들기는 중심을 지키는 힘을 길러준다.",
+        "historical_note": "학이 한 발로 서 있는 모습을 형상화한 동작으로, 고고한 품격을 의미합니다.",
+        "video_file": "basic-actions/one-leg-lift.mp4"
+    },
+    {
+        "name": "호흡",
+        "description": "숨의 길이를 달리해 동작을 이어주는 원리",
+        "story_card": "호흡은 춤의 보이지 않는 심장이다. 긴 호흡은 여유를, 짧은 호흡은 순간을, 겹호흡은 깊이를 만들어낸다.",
+        "historical_note": "한국무용에서 호흡은 동작의 생명력을 불어넣는 핵심 요소입니다.",
+        "video_file": "basic-actions/breathing.mp4"
+    },
+    {
+        "name": "궁채",
+        "description": "팔을 크게 원으로 굽혀 돌리는 동작",
+        "story_card": "원은 끝없는 순환을 상징한다. 팔이 그린 원 안에 세상의 흐름이 담긴다.",
+        "historical_note": "큰 원을 그리는 동작으로 우주의 순환과 생명의 흐름을 표현합니다.",
+        "video_file": "basic-actions/large-circle.mp4"
+    }
+]
+
+# 12개 기본 동작 정의 (영어)
+basic_actions_en = [
+    {
+        "name": "Left-Right Flow",
+        "description": "Gently swaying shoulders and head from side to side",
+        "story_card": "Small movements create waves. My body sways like the ocean, opening the first breath of dance.",
+        "historical_note": "In Joseon court dance, 'Jwau-sae' represents the movement of a bird shaking its head left and right.",
+        "video_file": "basic-actions/left-right-flow.mp4"
+    },
+    {
+        "name": "Arm Circle",
+        "description": "Wrapping and connecting arms in circular motion",
+        "story_card": "The circle drawn by arm tips is a bridge of flow. Beginning and end connect to complete an unbroken rhythm.",
+        "historical_note": "Circular movements embody Eastern philosophy's concept of circulation and were frequently used in court dances.",
+        "video_file": "basic-actions/arm-circle.mp4"
+    },
+    {
+        "name": "Wrist Circle",
+        "description": "Circling wrists inward and outward",
+        "story_card": "Great energy blooms from small wrists. Subtle movements change the texture of the entire dance.",
+        "historical_note": "The delicate wrist movement is a signature element showing Korean dance's refinement.",
+        "video_file": "basic-actions/wrist-circle.mp4"
+    },
+    {
+        "name": "Head Circle",
+        "description": "Smoothly rotating the head in a circle",
+        "story_card": "Head rotation expands vision and thought. As the circle grows, so does the heart.",
+        "historical_note": "Head circles embody Korean dance's core philosophy of entrusting the body to nature's flow.",
+        "video_file": "basic-actions/head-circle.mp4"
+    },
+    {
+        "name": "Wind Blowing",
+        "description": "Waving arms and hands like a breeze",
+        "story_card": "Light as wind, yet invisibly strong. From fingertips opens a path connecting to the world.",
+        "historical_note": "This movement visualizing nature's wind shows our culture's pursuit of harmony between human and nature.",
+        "video_file": "basic-actions/wind-blowing.mp4"
+    },
+    {
+        "name": "Palm Flip",
+        "description": "Simply flipping palms up and down",
+        "story_card": "The moment of flipping changes the world. As up and down switch, life's perspective renews.",
+        "historical_note": "A movement representing the transition of yin and yang, containing the philosophy of change and harmony.",
+        "video_file": "basic-actions/palm-flip.mp4"
+    },
+    {
+        "name": "Single Step",
+        "description": "Basic walk stepping forward and shifting weight",
+        "story_card": "A simple step, yet all beginnings open here. The moment feet touch ground, dance comes alive.",
+        "historical_note": "The foundation of all movement in Korean dance, expressing both stability and elegance.",
+        "video_file": "basic-actions/single-step.mp4"
+    },
+    {
+        "name": "Small Steps",
+        "description": "Small steps pressing or slightly lifting from the floor",
+        "story_card": "Small steps are dialogue with the ground. Committing weight or lifting captures both life's heaviness and lightness.",
+        "historical_note": "A representative step expressing Korean women's grace through careful and restrained movement.",
+        "video_file": "basic-actions/small-steps.mp4"
+    },
+    {
+        "name": "Bend-Stretch",
+        "description": "Bending and extending knees and torso",
+        "story_card": "Human attitude is contained in bending and extending. Humbly lowering and confidently rising.",
+        "historical_note": "A movement where Confucian etiquette is sublimated into dance, showing the aesthetics of stillness in motion.",
+        "video_file": "basic-actions/bend-stretch.mp4"
+    },
+    {
+        "name": "One Leg Lift",
+        "description": "Lifting one leg to maintain balance",
+        "story_card": "Must find balance even in wavering. One leg lift develops the power to maintain center.",
+        "historical_note": "Visualizing a crane standing on one foot, symbolizing noble dignity.",
+        "video_file": "basic-actions/one-leg-lift.mp4"
+    },
+    {
+        "name": "Breathing",
+        "description": "Principle connecting movements with varying breath lengths",
+        "story_card": "Breath is dance's invisible heart. Long breath creates leisure, short breath captures moments, layered breath creates depth.",
+        "historical_note": "In Korean dance, breathing is the core element infusing vitality into movements.",
+        "video_file": "basic-actions/breathing.mp4"
+    },
+    {
+        "name": "Large Circle",
+        "description": "Bending and rotating arms in a large circle",
+        "story_card": "The circle symbolizes endless circulation. Within the circle drawn by arms, the world's flow is contained.",
+        "historical_note": "Drawing a large circle expresses the universe's circulation and life's flow.",
+        "video_file": "basic-actions/large-circle.mp4"
+    }
+]
+
+# 언어에 따라 기본 동작 선택
+def get_basic_actions(lang='ko'):
+    return basic_actions_ko if lang == 'ko' else basic_actions_en
+
+basic_actions = basic_actions_ko  # 기본값
+
+# 확장 동작 (6개) - 한국어
+expanded_actions_ko = [
+    {
+        "name": "겹디딤",
+        "description": "두 발을 교차하며 밟는 걸음",
+        "story_card": "발과 발이 교차하며 만드는 리듬. 단순한 걸음이 겹치면서 복잡한 아름다움을 만들어낸다.",
+        "historical_note": "궁중무에서 정교한 발놀림을 표현하기 위해 발달한 동작으로, 섬세한 균형감을 요구합니다.",
+        "video_file": "expanded-actions/double-steps.mp4"
+    },
+    {
+        "name": "제자리돌기", 
+        "description": "같은 자리에 서서 회전하는 동작",
+        "story_card": "중심을 지키며 세상을 바라보는 시선이 바뀐다. 내 자리에서 우주를 감싸 안는 회전.",
+        "historical_note": "한국무용의 '돌기'는 회전하면서도 중심을 잃지 않는 철학을 담고 있습니다.",
+        "video_file": "expanded-actions/spin-in-place.mp4"
+    },
+    {
+        "name": "이동하면서돌기",
+        "description": "걸음을 옮기며 회전하는 동작", 
+        "story_card": "공간을 가로지르며 회전하는 몸. 이동과 회전이 하나 되어 흐름을 만들어낸다.",
+        "historical_note": "공간 이동과 회전을 동시에 수행하는 고난도 기술로, 춤의 역동성을 극대화합니다.",
+        "video_file": "expanded-actions/moving-spin.mp4"
+    },
+    {
+        "name": "점프하면서돌기",
+        "description": "뛰어오르며 회전하는 동작",
+        "story_card": "중력을 거스르는 순간, 공중에서 몸이 회전한다. 하늘과 땅 사이에서 자유를 맛본다.",
+        "historical_note": "현대 한국무용에 도입된 기교적 동작으로, 전통과 현대의 조화를 보여줍니다.",
+        "video_file": "expanded-actions/jumping-spin.mp4"
+    },
+    {
+        "name": "연풍대",
+        "description": "바람에 흔들리는 버드나무처럼 원을 그리며 회전하는 동작",
+        "story_card": "버들가지가 바람에 흔들리듯, 몸 전체가 부드럽게 흐른다. 자연의 유연함을 몸으로 표현하는 순간.",
+        "historical_note": "조선시대 춤에서 자연의 움직임을 가장 아름답게 형상화한 대표적 동작입니다.",
+        "video_file": "expanded-actions/Yeon-pung-dae.mp4"
+    },
+    {
+        "name": "치마채기",
+        "description": "치마 자락을 들어 움직임을 강조하는 동작",
+        "story_card": "치마가 펼쳐지는 순간, 작은 동작이 극적인 시각 효과를 만든다. 옷과 몸이 하나 되는 춤.",
+        "historical_note": "한복의 아름다움을 활용한 독특한 한국무용 기법으로, 의상과 춤의 조화를 보여줍니다.",
+        "video_file": "expanded-actions/skirt-snatch.mp4"
+    }
+]
+
+# 확장 동작 (6개) - 영어
+expanded_actions_en = [
+    {
+        "name": "Double Steps",
+        "description": "Steps crossing two feet alternately",
+        "story_card": "Rhythm created by crossing feet. Simple steps layering to create complex beauty.",
+        "historical_note": "Developed in court dance to express intricate footwork, requiring delicate balance.",
+        "video_file": "expanded-actions/double-steps.mp4"
+    },
+    {
+        "name": "Spin in Place",
+        "description": "Rotating while standing in the same spot",
+        "story_card": "Maintaining center while perspective on the world changes. Rotation embracing the universe from one's place.",
+        "historical_note": "Korean dance's 'spinning' contains the philosophy of rotating without losing center.",
+        "video_file": "expanded-actions/spin-in-place.mp4"
+    },
+    {
+        "name": "Moving Spin",
+        "description": "Rotating while moving through space",
+        "story_card": "Body rotating while traversing space. Movement and rotation become one to create flow.",
+        "historical_note": "Advanced technique performing spatial movement and rotation simultaneously, maximizing dance dynamics.",
+        "video_file": "expanded-actions/moving-spin.mp4"
+    },
+    {
+        "name": "Jumping Spin",
+        "description": "Rotating while leaping",
+        "story_card": "Moment defying gravity, body rotates in air. Tasting freedom between sky and earth.",
+        "historical_note": "Technical movement introduced to modern Korean dance, showing harmony of tradition and modernity.",
+        "video_file": "expanded-actions/jumping-spin.mp4"
+    },
+    {
+        "name": "Willow in Wind",
+        "description": "Rotating in circles like a willow swaying in wind",
+        "story_card": "Like willow branches swaying in wind, the whole body flows softly. Moment expressing nature's flexibility through body.",
+        "historical_note": "Representative movement most beautifully visualizing nature's motion in Joseon dynasty dance.",
+        "video_file": "expanded-actions/Yeon-pung-dae.mp4"
+    },
+    {
+        "name": "Skirt Catch",
+        "description": "Lifting skirt hem to emphasize movement",
+        "story_card": "Moment skirt unfolds, small movement creates dramatic visual effect. Dance where clothing and body become one.",
+        "historical_note": "Unique Korean dance technique utilizing hanbok's beauty, showing harmony of costume and dance.",
+        "video_file": "expanded-actions/skirt-snatch.mp4"
+    }
+]
+
+# 언어에 따라 확장 동작 선택
+def get_expanded_actions(lang='ko'):
+    return expanded_actions_ko if lang == 'ko' else expanded_actions_en
+
+expanded_actions = expanded_actions_ko  # 기본값
+
+# 창작 동작 (8개) - 한국어
+creative_actions_ko = [
+    {
+        "name": "풀업",
+        "description": "몸을 위로 길게 끌어올리는 동작",
+        "story_card": "땅에서 하늘로 뻗어 오르는 에너지. 중력에 저항하며 몸 전체가 위로 솟구친다.",
+        "historical_note": "현대무용에서 유래한 동작으로, 전통무용의 절제미와 대비되는 역동성을 보여줍니다.",
+        "video_file": "creative-actions/pull-up.mp4"
+    },
+    {
+        "name": "인파세/아웃파세",
+        "description": "무릎을 굽혀 발끝을 무릎에 붙이고 안팎으로 드는 동작",
+        "story_card": "한 발로 선 채 다른 다리로 균형을 찾는다. 내면과 외면을 오가는 움직임의 대화.",
+        "historical_note": "발레에서 온 기법이지만 한국무용에서 재해석되어 독특한 미학을 만들어냅니다.",
+        "video_file": "creative-actions/in-pase.mp4"
+    },
+    {
+        "name": "턴",
+        "description": "몸을 축으로 삼아 위로 세워 회전하는 동작",
+        "story_card": "몸이 하나의 축이 되어 빠르게 회전한다. 세상이 돌아가는 것이 아니라 내가 회전하며 세상을 본다.",
+        "historical_note": "서양 무용의 턴 기법을 한국무용에 접목한 현대적 표현입니다.",
+        "video_file": "creative-actions/up-turn.mp4"
+    },
+    {
+        "name": "점프",
+        "description": "바닥을 박차고 공중으로 뛰어오르는 동작",
+        "story_card": "땅을 박차는 순간, 잠시나마 자유를 경험한다. 공중에 머무는 짧은 시간이 영원처럼 느껴진다.",
+        "historical_note": "전통 한국무용의 절제된 움직임과 대조적인, 현대 무용의 폭발적 에너지를 표현합니다.",
+        "video_file": "creative-actions/jump.mp4"
+    },
+    {
+        "name": "롤링",
+        "description": "몸을 바닥에 굴리며 회전하는 동작",
+        "story_card": "바닥과 하나 되어 굴러간다. 낮아질수록 더 깊이 땅의 에너지를 느낀다.",
+        "historical_note": "현대무용의 플로어워크를 한국무용에 도입한 혁신적 시도입니다.",
+        "video_file": "creative-actions/rolling.mp4"
+    },
+    {
+        "name": "컨트렉션",
+        "description": "복부와 척추를 안으로 수축하는 동작",
+        "story_card": "몸을 안으로 수축하며 내면의 힘을 모은다. 팽창 전의 긴장, 폭발 전의 고요.",
+        "historical_note": "마사 그레이엄의 현대무용 기법을 기반으로 한 강렬한 표현 방식입니다.",
+        "video_file": "creative-actions/contraction.mp4"
+    },
+    {
+        "name": "웨이브",
+        "description": "척추와 몸통을 물결처럼 이어 흐르는 동작",
+        "story_card": "파도가 밀려오듯 몸이 물결친다. 척추 하나하나가 순차적으로 움직이며 흐름을 만든다.",
+        "historical_note": "동양 무술의 움직임과 현대무용이 결합된 유려한 표현 기법입니다.",
+        "video_file": "creative-actions/wave.mp4"
+    },
+    {
+        "name": "컴퍼스턴",
+        "description": "다리를 축으로 크게 원을 그리며 도는 동작",
+        "story_card": "몸이 컴퍼스가 되어 공간에 원을 그린다. 중심은 고정되고 끝은 자유롭게 움직인다.",
+        "historical_note": "브레이킹과 현대무용의 기교적 요소를 접목한 역동적 동작입니다.",
+        "video_file": "creative-actions/compass-turn.mp4"
+    }
+]
+
+# 창작 동작 (8개) - 영어
+creative_actions_en = [
+    {
+        "name": "Pull Up",
+        "description": "Movement pulling body upward lengthwise",
+        "story_card": "Energy stretching from earth to sky. Entire body surges upward resisting gravity.",
+        "historical_note": "Originating from modern dance, showing dynamism contrasting with traditional dance's restraint.",
+        "video_file": "creative-actions/pull-up.mp4"
+    },
+    {
+        "name": "Passé In/Out",
+        "description": "Bending knee to attach toes to knee, lifting inward and outward",
+        "story_card": "Finding balance with one leg while standing on the other. Movement dialogue traveling between inner and outer.",
+        "historical_note": "Though from ballet, reinterpreted in Korean dance to create unique aesthetics.",
+        "video_file": "creative-actions/in-pase.mp4"
+    },
+    {
+        "name": "Turn",
+        "description": "Rotating upward using body as axis",
+        "story_card": "Body becomes an axis rotating rapidly. Not the world turning, but I rotate to view the world.",
+        "historical_note": "Modern expression grafting Western dance's turn technique onto Korean dance.",
+        "video_file": "creative-actions/up-turn.mp4"
+    },
+    {
+        "name": "Jump",
+        "description": "Leaping off the ground into the air",
+        "story_card": "Moment kicking off ground, briefly experiencing freedom. Short time in air feels like eternity.",
+        "historical_note": "Expressing modern dance's explosive energy contrasting with traditional Korean dance's restrained movement.",
+        "video_file": "creative-actions/jump.mp4"
+    },
+    {
+        "name": "Rolling",
+        "description": "Rolling body on the floor while rotating",
+        "story_card": "Rolling as one with the floor. Lower you go, deeper you feel earth's energy.",
+        "historical_note": "Innovative attempt introducing modern dance's floorwork to Korean dance.",
+        "video_file": "creative-actions/rolling.mp4"
+    },
+    {
+        "name": "Contraction",
+        "description": "Contracting abdomen and spine inward",
+        "story_card": "Contracting body inward gathers inner strength. Tension before expansion, stillness before explosion.",
+        "historical_note": "Intense expression method based on Martha Graham's modern dance technique.",
+        "video_file": "creative-actions/contraction.mp4"
+    },
+    {
+        "name": "Wave",
+        "description": "Flowing spine and torso in wave-like succession",
+        "story_card": "Body ripples like incoming waves. Each vertebra moves sequentially to create flow.",
+        "historical_note": "Fluid expression technique combining Eastern martial arts movement with modern dance.",
+        "video_file": "creative-actions/wave.mp4"
+    },
+    {
+        "name": "Compass Turn",
+        "description": "Drawing large circles with leg as axis while turning",
+        "story_card": "Body becomes compass drawing circles in space. Center fixed, extremity moves freely.",
+        "historical_note": "Dynamic movement grafting technical elements of breaking and modern dance.",
+        "video_file": "creative-actions/compass-turn.mp4"
+    }
+]
+
+# 언어에 따라 창작 동작 선택
+def get_creative_actions(lang='ko'):
+    return creative_actions_ko if lang == 'ko' else creative_actions_en
+
+creative_actions = creative_actions_ko  # 기본값
+
+# 스토리 콘텐츠 - 한국어
+story_contents_ko = [
+    {
+        "title": "정중동의 미학",
+        "avatar": "🧘‍♀️",
+        "content": "고요함 속에 움직임이 있다는 한국무용의 핵심 철학입니다. 겉으로는 잔잔해 보이지만 내면에는 강렬한 에너지가 흐르고 있어요. 마치 잔잔한 호수 표면 아래 깊은 물줄기가 흐르는 것처럼, 한국무용은 절제된 움직임 속에 폭발적인 감정을 숨기고 있습니다.\n\n이런 미학은 현대 K-pop에서도 발견할 수 있어요. BTS의 'Spring Day'에서 보이는 절제된 안무나, 아이유의 차분하면서도 깊은 울림이 있는 퍼포먼스가 바로 정중동의 현대적 해석이라고 할 수 있습니다.",
+        "historical_note": "조선시대 궁중무에서 발달한 이 개념은 '움직이지 않는 것 같으나 실제로는 끊임없이 움직이는' 동양 철학의 핵심입니다."
+    },
+    {
+        "title": "자연과의 합일",
+        "avatar": "🌿",
+        "content": "한국무용의 모든 동작은 자연에서 영감을 받았습니다. '좌우새'는 새의 머리 흔들림을, '바람불기'는 자연의 바람을 형상화했어요. 이는 단순한 모방이 아니라, 인간이 자연의 일부임을 인정하고 조화를 추구하는 동양 철학의 발현입니다.\n\n우리 조상들은 춤을 통해 자연과 대화했어요. 학춤에서는 학의 우아함을, 승무에서는 나비의 가벼움을 표현했죠. 이런 자연 친화적 사고는 현재 전 세계적으로 주목받는 지속가능성과 환경 의식의 선구자적 모습을 보여줍니다.",
+        "historical_note": "삼국시대부터 이어진 이 전통은 무속의 자연 숭배 사상과 불교, 도교의 자연관이 융합되어 형성되었습니다."
+    },
+    {
+        "title": "K-pop 속 전통의 흔적",
+        "avatar": "🎤",
+        "content": "현대 K-pop 안무에는 한국무용의 DNA가 자연스럽게 스며들어 있습니다. BTS의 'Idol'에서 보이는 팔 감기 동작, 블랙핑크 제니의 절제된 손목 움직임, (여자)아이들의 전통적인 라인감... 이 모든 것들이 한국무용에서 온 것이에요.\n\n특히 '손목감기'나 '팔 감기' 같은 미세한 움직임은 서양 댄스에서는 찾아보기 힘든 한국만의 고유한 표현입니다. 이런 동작들이 K-pop을 단순한 팝음악이 아닌, 고유한 문화적 정체성을 가진 예술로 만들어주는 거죠.",
+        "historical_note": "1990년대부터 시작된 K-pop과 전통무용의 접목은 이제 전 세계적으로 '한국적인 것'의 상징이 되었습니다."
+    },
+    {
+        "title": "호흡의 철학",
+        "avatar": "💨",
+        "content": "한국무용에서 호흡은 단순한 숨이 아닙니다. 우주의 기운을 받아들이고 내뿜는 생명의 순환을 의미해요. '긴 호흡'은 여유와 깊이를, '짧은 호흡'은 순간의 강렬함을, '겹호흡'은 복잡한 감정의 층위를 표현합니다.\n\n이런 호흡법은 현대인의 마음을 치유하는 힘이 있어요. 스트레스로 얕아진 호흡을 깊게 만들고, 몸과 마음의 연결을 회복시켜 줍니다. 요가나 명상이 서구에서 주목받는 이유와 같은 맥락이죠.\n\n춤마루에서 경험하는 각 동작의 호흡은 단순한 운동이 아니라, 5000년 전통의 치유법을 체험하는 시간입니다.",
+        "historical_note": "조선 후기 실학자들은 이미 호흡과 건강의 관계를 깊이 연구했으며, 이는 현대 스포츠 과학과도 일맥상통합니다."
+    }
+]
+
+# 스토리 콘텐츠 - 영어
+story_contents_en = [
+    {
+        "title": "Aesthetics of Stillness in Motion",
+        "avatar": "🧘‍♀️",
+        "content": "Korean dance's core philosophy is that movement exists within stillness. Though appearing calm on the surface, intense energy flows within. Like deep currents flowing beneath a tranquil lake surface, Korean dance conceals explosive emotions within restrained movements.\n\nThis aesthetic can be found in modern K-pop too. The restrained choreography in BTS's 'Spring Day' or IU's calm yet deeply resonant performance can be seen as modern interpretations of stillness in motion.",
+        "historical_note": "Developed in Joseon dynasty court dance, this concept is central to Eastern philosophy: 'seeming motionless yet constantly moving'."
+    },
+    {
+        "title": "Unity with Nature",
+        "avatar": "🌿",
+        "content": "All Korean dance movements are inspired by nature. 'Jwau-sae' visualizes a bird's head shaking, 'Wind Blowing' embodies natural wind. This isn't simple imitation, but manifestation of Eastern philosophy acknowledging humans as part of nature, seeking harmony.\n\nOur ancestors dialogued with nature through dance. Crane dance expressed the crane's elegance, monk dance the butterfly's lightness. This nature-friendly thinking shows pioneering aspects of sustainability and environmental consciousness now gaining global attention.",
+        "historical_note": "This tradition from the Three Kingdoms period formed through fusion of shamanic nature worship with Buddhist and Taoist views of nature."
+    },
+    {
+        "title": "Traditional Traces in K-pop",
+        "avatar": "🎤",
+        "content": "Korean dance's DNA naturally permeates modern K-pop choreography. Arm circle movements in BTS's 'Idol', Jennie of Blackpink's restrained wrist movements, (G)I-DLE's traditional lines... all originate from Korean dance.\n\nEspecially subtle movements like 'wrist circles' or 'arm circles' are unique Korean expressions rarely found in Western dance. These movements make K-pop not just pop music, but art with unique cultural identity.",
+        "historical_note": "The grafting of K-pop and traditional dance starting in the 1990s has now become a worldwide symbol of 'Korean-ness'."
+    },
+    {
+        "title": "Philosophy of Breathing",
+        "avatar": "💨",
+        "content": "In Korean dance, breathing isn't just breath. It signifies life's circulation of receiving and releasing universal energy. 'Long breath' expresses leisure and depth, 'short breath' momentary intensity, 'layered breath' complex emotional layers.\n\nThis breathing method has power to heal modern minds. It deepens breath shallowed by stress, restoring mind-body connection. Same reason yoga and meditation gain attention in the West.\n\nBreathing in each movement you experience at Choomaru isn't just exercise, but time experiencing 5000 years of healing tradition.",
+        "historical_note": "Late Joseon practical scholars already deeply researched breathing's relationship to health, aligned with modern sports science."
+    }
+]
+
+# 언어에 따라 스토리 콘텐츠 선택
+def get_story_contents(lang='ko'):
+    return story_contents_ko if lang == 'ko' else story_contents_en
+
+story_contents = story_contents_ko  # 기본값
+
+# 배지 시스템
+badge_system_ko = {
+    3: {"name": "입문자", "emoji": "🌱", "message": "몸이 기억하기 시작했어요", "color": "#22C55E"},
+    6: {"name": "수련자", "emoji": "🎋", "message": "당신 안의 한국인이 깨어나고 있어요", "color": "#3B82F6"},
+    9: {"name": "달인", "emoji": "🏔️", "message": "이제 진짜 K-무브먼트를 이해하시네요", "color": "#8B5CF6"},
+    12: {"name": "마스터", "emoji": "👑", "message": "K-DNA 각성 완료", "color": "#F59E0B"}
+}
+
+badge_system_en = {
+    3: {"name": "Beginner", "emoji": "🌱", "message": "Your body is starting to remember", "color": "#22C55E"},
+    6: {"name": "Practitioner", "emoji": "🎋", "message": "The Korean within you is awakening", "color": "#3B82F6"},
+    9: {"name": "Master", "emoji": "🏔️", "message": "You now truly understand K-Movement", "color": "#8B5CF6"},
+    12: {"name": "Grand Master", "emoji": "👑", "message": "K-DNA Awakening Complete", "color": "#F59E0B"}
+}
+
+def get_badge_system(lang='ko'):
+    return badge_system_ko if lang == 'ko' else badge_system_en
+
+badge_system = badge_system_ko  # 기본값
+
+# DNA 분석 함수 (8개 타입 매핑)
+def analyze_dna(answers):
+    scores = {"A": 0, "B": 0, "C": 0, "D": 0}
+    for answer in answers:
+        scores[answer] += 1
+    
+    # 가장 높은 점수 두 개 찾기
+    sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    top_two = sorted([sorted_scores[0][0], sorted_scores[1][0]])
+    combination = " + ".join(top_two)
+    
+    # 8개 타입 조합에 따른 결과 매핑
+    combinations = {
+        "A + D": "밈 장인",
+        "A + C": "무드 큐레이터", 
+        "A + B": "갓생 플래너",
+        "B + C": "디테일 장인",
+        "C + D": "인간 공명기",
+        "B + D": "파티 히어로",
+        "C + D": "감성 필터",  # C+D 중복 해결을 위해 점수 차이로 구분
+        "A + A": "흥 폭발러",  # 동점 처리
+        "B + B": "갓생 플래너",
+        "C + C": "감성 필터",
+        "D + D": "흥 폭발러"
+    }
+    
+    # 동점인 경우 세밀한 분석
+    if sorted_scores[0][1] == sorted_scores[1][1]:
+        if sorted_scores[0][1] == sorted_scores[2][1]:  # 3점 동점
+            return "밈 장인"  # 기본값
+        # C+D 구분 로직
+        if combination == "C + D":
+            c_score = scores["C"]
+            d_score = scores["D"]
+            return "감성 필터" if c_score >= d_score else "인간 공명기"
+    
+    return combinations.get(combination, "밈 장인")
+
+# MediaPipe 초기화
+@st.cache_resource
+def init_mediapipe():
+    mp_pose = mp.solutions.pose
+    pose = mp_pose.Pose(
+        static_image_mode=False,
+        model_complexity=1,
+        enable_segmentation=False,
+        min_detection_confidence=0.5,
+        min_tracking_confidence=0.5
+    )
+    return pose, mp_pose
+
+# 동작 분석 함수 (간단한 예시)
+def analyze_movement(pose_landmarks, action_name):
+    """
+    실제로는 더 복잡한 동작 분석 로직이 들어갈 곳
+    현재는 랜덤으로 성공/실패 반환
+    """
+    # 랜덤 성공/실패 (70% 성공률)
+    success = random.random() > 0.3
+    
+    if success:
+        return {
+            "success": True,
+            "score": random.randint(85, 98),
+            "message": "완벽합니다! 움직임 속에 숨겨진 의미를 느끼셨나요?"
+        }
+    else:
+        return {
+            "success": False,
+            "score": random.randint(45, 75),
+            "message": "아쉬워요! 천천히 따라해보세요."
+        }
+
+# 비디오 프레임 캡쳐 함수
+def capture_video_frame(video_path, frame_position=0.5):
+    """
+    비디오에서 특정 위치의 프레임을 캡쳐
+    frame_position: 0.0 ~ 1.0 (비디오의 위치 비율)
+    """
+    try:
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return None
+        
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        target_frame = int(total_frames * frame_position)
+        
+        cap.set(cv2.CAP_PROP_POS_FRAMES, target_frame)
+        ret, frame = cap.read()
+        cap.release()
+        
+        if ret:
+            # BGR to RGB 변환
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            return Image.fromarray(frame)
+    except Exception as e:
+        print(f"비디오 프레임 캡쳐 오류: {e}")
+    
+    return None
+
+# 밈 카드 생성 함수 (개선된 버전)
+def create_meme_card(dna_type_name, dna_data):
+    """DNA 영상 배경을 사용한 밈 카드 생성"""
+    width, height = 1080, 1080
+    
+    # 1. DNA 타입 영상에서 프레임 캡쳐 시도
+    video_path = f"videos/{dna_data['video_file']}"
+    background = capture_video_frame(video_path, frame_position=0.5)
+    
+    if background:
+        # 이미지 크기 조정 (정사각형으로 크롭)
+        bg_width, bg_height = background.size
+        
+        # 중앙 크롭
+        if bg_width > bg_height:
+            left = (bg_width - bg_height) // 2
+            background = background.crop((left, 0, left + bg_height, bg_height))
+        else:
+            top = (bg_height - bg_width) // 2
+            background = background.crop((0, top, bg_width, top + bg_width))
+        
+        # 리사이즈
+        background = background.resize((width, height), Image.Resampling.LANCZOS)
+        
+        # 약간 어둡게 (텍스트 가독성 향상)
+        enhancer = ImageEnhance.Brightness(background)
+        background = enhancer.enhance(0.5)
+        
+        # 약간 블러 효과
+        background = background.filter(ImageFilter.GaussianBlur(2))
+    else:
+        # 영상이 없으면 단색 배경 사용
+        background = Image.new('RGB', (width, height), color=dna_data['color'])
+    
+    # 2. 반투명 오버레이 레이어 추가
+    overlay = Image.new('RGBA', (width, height), (0, 0, 0, 120))
+    background = background.convert('RGBA')
+    background = Image.alpha_composite(background, overlay)
+    
+    # 3. 텍스트 추가
+    draw = ImageDraw.Draw(background)
+    
+    # 폰트 로드 시도
+    try:
+        # Windows 한글 폰트
+        title_font = ImageFont.truetype("malgun.ttf", 90)
+        subtitle_font = ImageFont.truetype("malgun.ttf", 60)
+        hashtag_font = ImageFont.truetype("malgun.ttf", 45)
+    except:
+        try:
+            # 다른 한글 폰트 시도
+            title_font = ImageFont.truetype("C:/Windows/Fonts/malgun.ttf", 90)
+            subtitle_font = ImageFont.truetype("C:/Windows/Fonts/malgun.ttf", 60)
+            hashtag_font = ImageFont.truetype("C:/Windows/Fonts/malgun.ttf", 45)
+        except:
+            # 기본 폰트
+            title_font = ImageFont.load_default()
+            subtitle_font = ImageFont.load_default()
+            hashtag_font = ImageFont.load_default()
+    
+    # 언어에 따른 텍스트
+    lang = st.session_state.get('language', 'ko')
+    
+    # 텍스트 위치 및 내용
+    texts = [
+        {
+            "text": f"{t('meme_i_am', lang)} {dna_type_name}!",
+            "font": title_font,
+            "position": (width//2, height//3),
+            "fill": "white"
+        },
+        {
+            "text": f"{dna_data['emoji']} {dna_data['title']}",
+            "font": subtitle_font,
+            "position": (width//2, height//2),
+            "fill": "white"
+        },
+        {
+            "text": t('meme_hashtag', lang),
+            "font": hashtag_font,
+            "position": (width//2, height*3//4),
+            "fill": "#FFD700"
+        }
+    ]
+    
+    # 텍스트 그리기 (외곽선 효과)
+    for text_info in texts:
+        x, y = text_info["position"]
+        text = text_info["text"]
+        font = text_info["font"]
+        
+        # 외곽선 (검은색) - 더 두껍게
+        outline_range = 4
+        for adj_x in range(-outline_range, outline_range + 1):
+            for adj_y in range(-outline_range, outline_range + 1):
+                if adj_x != 0 or adj_y != 0:
+                    try:
+                        draw.text((x + adj_x, y + adj_y), text, 
+                                fill='black', font=font, anchor='mm')
+                    except:
+                        draw.text((x + adj_x, y + adj_y), text, 
+                                fill='black', font=font)
+        
+        # 메인 텍스트
+        try:
+            draw.text((x, y), text, fill=text_info["fill"], font=font, anchor='mm')
+        except:
+            draw.text((x, y), text, fill=text_info["fill"], font=font)
+    
+    return background.convert('RGB')
+
+# 스타일 A: 그라데이션 박스
+def create_meme_card_gradient_box(dna_type_name, dna_data):
+    """그라데이션 박스 스타일 - 상단/하단에 텍스트 박스"""
+    width, height = 1080, 1080
+    
+    # 배경 영상 프레임 가져오기
+    video_path = f"videos/{dna_data['video_file']}"
+    background = capture_video_frame(video_path, frame_position=0.5)
+    
+    if background:
+        bg_width, bg_height = background.size
+        if bg_width > bg_height:
+            left = (bg_width - bg_height) // 2
+            background = background.crop((left, 0, left + bg_height, bg_height))
+        else:
+            top = (bg_height - bg_width) // 2
+            background = background.crop((0, top, bg_width, top + bg_width))
+        background = background.resize((width, height), Image.Resampling.LANCZOS)
+        # 블러만 살짝
+        background = background.filter(ImageFilter.GaussianBlur(1))
+    else:
+        background = Image.new('RGB', (width, height), color=dna_data['color'])
+    
+    background = background.convert('RGBA')
+    
+    # 상단 그라데이션 박스
+    top_box_height = 250
+    for i in range(top_box_height):
+        alpha = int(200 * (1 - i / top_box_height))  # 200 -> 0
+        overlay_line = Image.new('RGBA', (width, 1), (0, 0, 0, alpha))
+        background.paste(overlay_line, (0, i), overlay_line)
+    
+    # 하단 그라데이션 박스
+    bottom_box_height = 200
+    for i in range(bottom_box_height):
+        alpha = int(200 * (i / bottom_box_height))  # 0 -> 200
+        overlay_line = Image.new('RGBA', (width, 1), (0, 0, 0, alpha))
+        background.paste(overlay_line, (0, height - bottom_box_height + i), overlay_line)
+    
+    draw = ImageDraw.Draw(background)
+    
+    # 폰트
+    try:
+        title_font = ImageFont.truetype("malgun.ttf", 85)
+        subtitle_font = ImageFont.truetype("malgun.ttf", 55)
+        hashtag_font = ImageFont.truetype("malgun.ttf", 42)
+    except:
+        title_font = subtitle_font = hashtag_font = ImageFont.load_default()
+    
+    # 상단 텍스트
+    top_texts = [
+        {"text": f"나는 {dna_type_name}!", "font": title_font, "y": 80},
+        {"text": f"{dna_data['emoji']} {dna_data['title']}", "font": subtitle_font, "y": 165}
+    ]
+    
+    for text_info in top_texts:
+        x, y = width//2, text_info["y"]
+        text = text_info["text"]
+        font = text_info["font"]
+        
+        # 외곽선
+        for adj in [(-3, -3), (-3, 0), (-3, 3), (0, -3), (0, 3), (3, -3), (3, 0), (3, 3)]:
+            try:
+                draw.text((x + adj[0], y + adj[1]), text, fill='black', font=font, anchor='mm')
+            except:
+                draw.text((x + adj[0], y + adj[1]), text, fill='black', font=font)
+        
+        try:
+            draw.text((x, y), text, fill='white', font=font, anchor='mm')
+        except:
+            draw.text((x, y), text, fill='white', font=font)
+    
+    # 하단 해시태그
+    hash_y = height - 100
+    for adj in [(-3, -3), (-3, 0), (-3, 3), (0, -3), (0, 3), (3, -3), (3, 0), (3, 3)]:
+        try:
+            draw.text((width//2 + adj[0], hash_y + adj[1]), "#춤마루 #K_DNA각성", 
+                     fill='black', font=hashtag_font, anchor='mm')
+        except:
+            draw.text((width//2 + adj[0], hash_y + adj[1]), "#춤마루 #K_DNA각성", 
+                     fill='black', font=hashtag_font)
+    
+    try:
+        draw.text((width//2, hash_y), "#춤마루 #K_DNA각성", 
+                 fill='#FFD700', font=hashtag_font, anchor='mm')
+    except:
+        draw.text((width//2, hash_y), "#춤마루 #K_DNA각성", 
+                 fill='#FFD700', font=hashtag_font)
+    
+    return background.convert('RGB')
+
+# 스타일 B: 네온 스타일
+def create_meme_card_neon(dna_type_name, dna_data):
+    """네온 스타일 - 형광 색상 + 글로우 효과"""
+    width, height = 1080, 1080
+    
+    # 배경
+    video_path = f"videos/{dna_data['video_file']}"
+    background = capture_video_frame(video_path, frame_position=0.5)
+    
+    if background:
+        bg_width, bg_height = background.size
+        if bg_width > bg_height:
+            left = (bg_width - bg_height) // 2
+            background = background.crop((left, 0, left + bg_height, bg_height))
+        else:
+            top = (bg_height - bg_width) // 2
+            background = background.crop((0, top, bg_width, top + bg_width))
+        background = background.resize((width, height), Image.Resampling.LANCZOS)
+        # 약간만 어둡게 (영상이 보이도록)
+        enhancer = ImageEnhance.Brightness(background)
+        background = enhancer.enhance(0.5)
+        background = background.filter(ImageFilter.GaussianBlur(2))
+    else:
+        background = Image.new('RGB', (width, height), color='#000033')
+    
+    background = background.convert('RGBA')
+    
+    # 다크 오버레이 (더 투명하게)
+    overlay = Image.new('RGBA', (width, height), (0, 0, 30, 100))
+    background = Image.alpha_composite(background, overlay)
+    
+    draw = ImageDraw.Draw(background)
+    
+    # 폰트
+    try:
+        title_font = ImageFont.truetype("malgun.ttf", 85)
+        subtitle_font = ImageFont.truetype("malgun.ttf", 55)
+        hashtag_font = ImageFont.truetype("malgun.ttf", 42)
+    except:
+        title_font = subtitle_font = hashtag_font = ImageFont.load_default()
+    
+    # 네온 색상
+    neon_pink = '#FF10F0'
+    neon_cyan = '#00FFFF'
+    
+    texts = [
+        {"text": f"나는 {dna_type_name}!", "font": title_font, "y": 150, "color": neon_pink},
+        {"text": f"{dna_data['emoji']} {dna_data['title']}", "font": subtitle_font, "y": 240, "color": neon_cyan},
+        {"text": "#춤마루 #K_DNA각성", "font": hashtag_font, "y": 900, "color": neon_pink}
+    ]
+    
+    for text_info in texts:
+        x, y = width//2, text_info["y"]
+        text = text_info["text"]
+        font = text_info["font"]
+        color = text_info["color"]
+        
+        # 글로우 효과 (얇게 조정)
+        for glow_size in [4, 2]:
+            for adj_x in range(-glow_size, glow_size + 1, 2):
+                for adj_y in range(-glow_size, glow_size + 1, 2):
+                    if adj_x != 0 or adj_y != 0:
+                        try:
+                            draw.text((x + adj_x, y + adj_y), text, 
+                                    fill=color + '30', font=font, anchor='mm')
+                        except:
+                            pass
+        
+        # 외곽선 (검은색, 가독성)
+        for adj in [(-2, -2), (-2, 0), (-2, 2), (0, -2), (0, 2), (2, -2), (2, 0), (2, 2)]:
+            try:
+                draw.text((x + adj[0], y + adj[1]), text, 
+                         fill='black', font=font, anchor='mm')
+            except:
+                pass
+        
+        # 메인 텍스트
+        try:
+            draw.text((x, y), text, fill=color, font=font, anchor='mm')
+        except:
+            draw.text((x, y), text, fill=color, font=font)
+    
+    return background.convert('RGB')
+
+# 스타일 C: 듀얼 톤
+def create_meme_card_dualtone(dna_type_name, dna_data):
+    """듀얼 톤 스타일 - 컬러 필터 (보라+핑크)"""
+    width, height = 1080, 1080
+    
+    # 배경
+    video_path = f"videos/{dna_data['video_file']}"
+    background = capture_video_frame(video_path, frame_position=0.5)
+    
+    if background:
+        bg_width, bg_height = background.size
+        if bg_width > bg_height:
+            left = (bg_width - bg_height) // 2
+            background = background.crop((left, 0, left + bg_height, bg_height))
+        else:
+            top = (bg_height - bg_width) // 2
+            background = background.crop((0, top, bg_width, top + bg_width))
+        background = background.resize((width, height), Image.Resampling.LANCZOS)
+    else:
+        background = Image.new('RGB', (width, height), color=dna_data['color'])
+    
+    background = background.convert('RGBA')
+    
+    # 듀얼 톤 오버레이 (보라색 + 핑크색 그라데이션)
+    for y in range(height):
+        ratio = y / height
+        r = int(138 + (255 - 138) * ratio)  # 138 -> 255
+        g = int(43 + (105 - 43) * ratio)    # 43 -> 105
+        b = int(226 + (180 - 226) * ratio)  # 226 -> 180
+        overlay_line = Image.new('RGBA', (width, 1), (r, g, b, 100))
+        background.paste(overlay_line, (0, y), overlay_line)
+    
+    draw = ImageDraw.Draw(background)
+    
+    # 폰트
+    try:
+        title_font = ImageFont.truetype("malgun.ttf", 90)
+        subtitle_font = ImageFont.truetype("malgun.ttf", 60)
+        hashtag_font = ImageFont.truetype("malgun.ttf", 45)
+    except:
+        title_font = subtitle_font = hashtag_font = ImageFont.load_default()
+    
+    texts = [
+        {"text": f"나는 {dna_type_name}!", "font": title_font, "y": 150},
+        {"text": f"{dna_data['emoji']} {dna_data['title']}", "font": subtitle_font, "y": 250},
+        {"text": "#춤마루 #K_DNA각성", "font": hashtag_font, "y": 900}
+    ]
+    
+    for text_info in texts:
+        x, y = width//2, text_info["y"]
+        text = text_info["text"]
+        font = text_info["font"]
+        
+        # 외곽선
+        for adj in [(-4, -4), (-4, 0), (-4, 4), (0, -4), (0, 4), (4, -4), (4, 0), (4, 4)]:
+            try:
+                draw.text((x + adj[0], y + adj[1]), text, fill='black', font=font, anchor='mm')
+            except:
+                pass
+        
+        try:
+            draw.text((x, y), text, fill='white', font=font, anchor='mm')
+        except:
+            draw.text((x, y), text, fill='white', font=font)
+    
+    return background.convert('RGB')
+
+# 스타일 D: 미니멀
+def create_meme_card_minimal(dna_type_name, dna_data):
+    """미니멀 스타일 - 심플하고 깔끔하게"""
+    width, height = 1080, 1080
+    
+    # 배경
+    video_path = f"videos/{dna_data['video_file']}"
+    background = capture_video_frame(video_path, frame_position=0.5)
+    
+    if background:
+        bg_width, bg_height = background.size
+        if bg_width > bg_height:
+            left = (bg_width - bg_height) // 2
+            background = background.crop((left, 0, left + bg_height, bg_height))
+        else:
+            top = (bg_height - bg_width) // 2
+            background = background.crop((0, top, bg_width, top + bg_width))
+        background = background.resize((width, height), Image.Resampling.LANCZOS)
+        # 약한 블러 (영상을 더 선명하게)
+        background = background.filter(ImageFilter.GaussianBlur(3))
+        # 밝기 조정
+        enhancer = ImageEnhance.Brightness(background)
+        background = enhancer.enhance(0.7)
+    else:
+        background = Image.new('RGB', (width, height), color='#F5F5F5')
+    
+    background = background.convert('RGBA')
+    
+    # 반투명 화이트 오버레이 (더 투명하게)
+    overlay = Image.new('RGBA', (width, height), (255, 255, 255, 60))
+    background = Image.alpha_composite(background, overlay)
+    
+    draw = ImageDraw.Draw(background)
+    
+    # 폰트
+    try:
+        title_font = ImageFont.truetype("malgun.ttf", 75)
+        subtitle_font = ImageFont.truetype("malgun.ttf", 52)
+        hashtag_font = ImageFont.truetype("malgun.ttf", 38)
+    except:
+        title_font = subtitle_font = hashtag_font = ImageFont.load_default()
+    
+    # 텍스트 배치: 제목 위, 해시태그 아래
+    texts = [
+        {"text": f"나는 {dna_type_name}!", "font": title_font, "y": 120, "align": "center"},
+        {"text": f"{dna_data['emoji']} {dna_data['title']}", "font": subtitle_font, "y": 210, "align": "center"},
+        {"text": "#춤마루 #K_DNA각성", "font": hashtag_font, "y": 950, "align": "center"}
+    ]
+    
+    for text_info in texts:
+        x = width//2
+        y = text_info["y"]
+        text = text_info["text"]
+        font = text_info["font"]
+        
+        # 부드러운 그림자
+        for adj in [(3, 3), (2, 2), (1, 1)]:
+            try:
+                draw.text((x + adj[0], y + adj[1]), text, 
+                         fill='#00000030', font=font, anchor='mm')
+            except:
+                pass
+        
+        # 메인 텍스트
+        try:
+            draw.text((x, y), text, fill='#333333', font=font, anchor='mm')
+        except:
+            draw.text((x, y), text, fill='#333333', font=font)
+    
+    return background.convert('RGB')
+
+# GIF 밈 생성 함수
+def create_meme_gif(dna_type_name, dna_data, duration=3, fps=10, style='gradient'):
+    """
+    DNA 영상에서 여러 프레임을 추출해 GIF 생성
+    duration: GIF 길이 (초)
+    fps: 초당 프레임 수
+    style: 'gradient', 'neon', 'dualtone', 'minimal'
+    """
+    width, height = 1080, 1080
+    video_path = f"videos/{dna_data['video_file']}"
+    
+    # 영상 열기
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        return None
+    
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    video_fps = cap.get(cv2.CAP_PROP_FPS)
+    
+    # GIF에 사용할 프레임 수
+    target_frames = duration * fps
+    frames = []
+    
+    # 폰트 로드
+    try:
+        title_font = ImageFont.truetype("malgun.ttf", 85)
+        subtitle_font = ImageFont.truetype("malgun.ttf", 55)
+        hashtag_font = ImageFont.truetype("malgun.ttf", 42)
+    except:
+        title_font = subtitle_font = hashtag_font = ImageFont.load_default()
+    
+    # 프레임 추출 및 텍스트 오버레이
+    for i in range(target_frames):
+        # 영상의 어느 부분을 가져올지 계산 (중간 부분 순환)
+        frame_pos = 0.3 + (i / target_frames) * 0.4  # 30%~70% 구간
+        frame_number = int(total_frames * frame_pos)
+        
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+        ret, frame = cap.read()
+        
+        if not ret:
+            continue
+        
+        # BGR to RGB
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        img = Image.fromarray(frame)
+        
+        # 정사각형 크롭
+        img_width, img_height = img.size
+        if img_width > img_height:
+            left = (img_width - img_height) // 2
+            img = img.crop((left, 0, left + img_height, img_height))
+        else:
+            top = (img_height - img_width) // 2
+            img = img.crop((0, top, img_width, top + img_width))
+        
+        # 리사이즈
+        img = img.resize((width, height), Image.Resampling.LANCZOS)
+        
+        # 스타일에 따라 처리
+        if style == 'neon':
+            # 네온: 어둡고 강렬하게
+            enhancer = ImageEnhance.Brightness(img)
+            img = enhancer.enhance(0.3)  # 더 어둡게
+            img = img.filter(ImageFilter.GaussianBlur(3))
+            img = img.convert('RGBA')
+            # 진한 남색 오버레이
+            overlay = Image.new('RGBA', (width, height), (10, 0, 50, 150))
+            img = Image.alpha_composite(img, overlay)
+            
+        elif style == 'dualtone':
+            # 듀얼 톤: 강한 컬러 필터
+            img = img.convert('RGBA')
+            # 전체 이미지에 컬러 필터 적용 (더 빠르고 명확)
+            color_overlay = Image.new('RGBA', (width, height))
+            pixels = color_overlay.load()
+            for y in range(height):
+                ratio = y / height
+                # 보라색 -> 핑크색 그라데이션 (더 강하게)
+                r = int(138 + (255 - 138) * ratio)
+                g = int(43 + (105 - 43) * ratio)
+                b = int(226 + (180 - 226) * ratio)
+                for x in range(width):
+                    pixels[x, y] = (r, g, b, 160)  # alpha 160으로 강하게
+            img = Image.alpha_composite(img, color_overlay)
+            
+        elif style == 'minimal':
+            # 미니멀: 밝고 깔끔하게
+            img = img.filter(ImageFilter.GaussianBlur(5))  # 더 블러
+            enhancer = ImageEnhance.Brightness(img)
+            img = enhancer.enhance(0.8)  # 더 밝게
+            img = img.convert('RGBA')
+            # 화이트 오버레이 강하게
+            overlay = Image.new('RGBA', (width, height), (255, 255, 255, 120))
+            img = Image.alpha_composite(img, overlay)
+            
+        else:  # gradient (기본)
+            img = img.filter(ImageFilter.GaussianBlur(1))
+            img = img.convert('RGBA')
+            # 상단/하단 그라데이션 박스
+            top_box_height = 250
+            for j in range(top_box_height):
+                alpha = int(200 * (1 - j / top_box_height))
+                overlay_line = Image.new('RGBA', (width, 1), (0, 0, 0, alpha))
+                img.paste(overlay_line, (0, j), overlay_line)
+            bottom_box_height = 200
+            for j in range(bottom_box_height):
+                alpha = int(200 * (j / bottom_box_height))
+                overlay_line = Image.new('RGBA', (width, 1), (0, 0, 0, alpha))
+                img.paste(overlay_line, (0, height - bottom_box_height + j), overlay_line)
+        
+        # 텍스트 추가
+        draw = ImageDraw.Draw(img)
+        
+        # 텍스트 위치 (스타일에 따라)
+        if style in ['gradient', 'neon', 'dualtone']:
+            texts = [
+                {"text": f"나는 {dna_type_name}!", "font": title_font, "y": 80},
+                {"text": f"{dna_data['emoji']} {dna_data['title']}", "font": subtitle_font, "y": 165},
+                {"text": "#춤마루 #K_DNA각성", "font": hashtag_font, "y": height - 100}
+            ]
+        else:  # minimal
+            texts = [
+                {"text": f"나는 {dna_type_name}!", "font": title_font, "y": 120},
+                {"text": f"{dna_data['emoji']} {dna_data['title']}", "font": subtitle_font, "y": 210},
+                {"text": "#춤마루 #K_DNA각성", "font": hashtag_font, "y": 950}
+            ]
+        
+        # 텍스트 그리기 (외곽선 + 메인)
+        for text_info in texts:
+            x, y = width//2, text_info["y"]
+            text = text_info["text"]
+            font = text_info["font"]
+            
+            # 스타일별 텍스트 색상 및 효과
+            if style == 'neon':
+                # 네온: 형광 색상 + 강한 글로우
+                if '춤마루' in text:
+                    text_color = '#FF10F0'  # 핑크
+                elif '나는' in text:
+                    text_color = '#FF10F0'  # 핑크
+                else:
+                    text_color = '#00FFFF'  # 시안
+                
+                # 글로우 효과
+                for glow in [6, 4, 2]:
+                    for adj_x in range(-glow, glow + 1, 2):
+                        for adj_y in range(-glow, glow + 1, 2):
+                            if adj_x != 0 or adj_y != 0:
+                                try:
+                                    draw.text((x + adj_x, y + adj_y), text, 
+                                            fill=text_color + '40', font=font, anchor='mm')
+                                except:
+                                    pass
+                
+                # 검은 외곽선
+                for adj in [(-2, -2), (-2, 0), (-2, 2), (0, -2), (0, 2), (2, -2), (2, 0), (2, 2)]:
+                    try:
+                        draw.text((x + adj[0], y + adj[1]), text, fill='black', font=font, anchor='mm')
+                    except:
+                        pass
+                
+            elif style == 'minimal':
+                # 미니멀: 검은색 텍스트 + 부드러운 그림자
+                text_color = '#222222'
+                
+                # 그림자
+                for adj in [(3, 3), (2, 2)]:
+                    try:
+                        draw.text((x + adj[0], y + adj[1]), text, 
+                                fill='#00000030', font=font, anchor='mm')
+                    except:
+                        pass
+                
+            elif style == 'dualtone':
+                # 듀얼 톤: 흰색 텍스트 + 검은 외곽선
+                text_color = 'white' if '춤마루' not in text else '#FFD700'
+                
+                # 외곽선
+                for adj in [(-3, -3), (-3, 0), (-3, 3), (0, -3), (0, 3), (3, -3), (3, 0), (3, 3)]:
+                    try:
+                        draw.text((x + adj[0], y + adj[1]), text, fill='black', font=font, anchor='mm')
+                    except:
+                        pass
+                
+            else:  # gradient
+                # 그라데이션: 흰색 텍스트 + 검은 외곽선 + 골드 해시태그
+                text_color = '#FFD700' if '춤마루' in text else 'white'
+                
+                # 외곽선
+                for adj in [(-3, -3), (-3, 0), (-3, 3), (0, -3), (0, 3), (3, -3), (3, 0), (3, 3)]:
+                    try:
+                        draw.text((x + adj[0], y + adj[1]), text, fill='black', font=font, anchor='mm')
+                    except:
+                        pass
+            
+            # 메인 텍스트
+            try:
+                draw.text((x, y), text, fill=text_color, font=font, anchor='mm')
+            except:
+                draw.text((x, y), text, fill=text_color, font=font)
+        
+        # RGB로 변환 후 리스트에 추가
+        frames.append(img.convert('RGB'))
+    
+    cap.release()
+    
+    if not frames:
+        return None
+    
+    # GIF 생성
+    gif_buffer = io.BytesIO()
+    frames[0].save(
+        gif_buffer,
+        format='GIF',
+        save_all=True,
+        append_images=frames[1:],
+        duration=int(1000 / fps),  # ms per frame
+        loop=0,  # 무한 반복
+        optimize=False  # 최적화 비활성화 (속도 향상)
+    )
+    
+    gif_buffer.seek(0)
+    return gif_buffer
+
+# 메인 앱 로직
+def main():
+    init_session_state()
+    
+    # 사이드바에 언어 선택 추가
+    with st.sidebar:
+        st.markdown("### 🌐 Language / 언어")
+        lang_option = st.selectbox(
+            "",
+            ["🇰🇷 한국어", "🇺🇸 English"],
+            index=0 if st.session_state.language == 'ko' else 1,
+            key='lang_selector'
+        )
+        
+        # 언어 변경 감지
+        new_lang = 'ko' if '한국어' in lang_option else 'en'
+        if new_lang != st.session_state.language:
+            st.session_state.language = new_lang
+            st.rerun()
+    
+    # 헤더
+    st.markdown(f"""
+    <div style='text-align: center; padding: 2rem 0;'>
+        <h1 style='color: #667eea; font-size: 3rem; margin-bottom: 0;'>🎭 {t('app_title')}</h1>
+        <p style='color: #666; font-size: 1.2rem;'>{t('app_subtitle')}</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # 단계별 라우팅
+    if st.session_state.current_step == 'landing':
+        show_landing_page()
+    elif st.session_state.current_step == 'test':
+        show_test_page()
+    elif st.session_state.current_step == 'result':
+        show_result_page()
+    elif st.session_state.current_step == 'action_select':
+        show_action_select_page()
+    elif st.session_state.current_step == 'action':
+        show_action_page()
+    elif st.session_state.current_step == 'expanded_action':
+        show_expanded_action_page()
+    elif st.session_state.current_step == 'creative_action':
+        show_creative_action_page()
+    elif st.session_state.current_step == 'story':
+        show_story_page()
+    elif st.session_state.current_step == 'story_detail':
+        show_story_detail_page()
+    elif st.session_state.current_step == 'meme':
+        show_meme_page()
+
+def show_landing_page():
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col2:
+        st.markdown(f"""
+        <div style='text-align: center; padding: 2rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                    border-radius: 20px; color: white; margin: 2rem 0;'>
+            <h2>{t('landing_hero')}</h2>
+            <p style='font-size: 1.1rem; margin: 1.5rem 0;'>
+                {t('landing_desc')}
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.markdown(f"### {t('landing_journey')}")
+        
+        # 여정 단계들
+        journey_steps = [
+            ("1", t('journey_1_title'), t('journey_1_desc'), "#667eea"),
+            ("2", t('journey_2_title'), t('journey_2_desc'), "#4ECDC4"),  
+            ("3", t('journey_3_title'), t('journey_3_desc'), "#FFD700"),
+            ("4", t('journey_4_title'), t('journey_4_desc'), "#FF69B4")
+        ]
+        
+        for step, title, desc, color in journey_steps:
+            st.markdown(f"""
+            <div class='journey-step' style='background: linear-gradient(135deg, {color}, {color}dd); margin: 0.5rem 0;'>
+                <div style='display: flex; align-items: center;'>
+                    <div style='background: rgba(255,255,255,0.3); width: 2rem; height: 2rem; border-radius: 50%; 
+                                display: flex; align-items: center; justify-content: center; margin-right: 1rem;
+                                font-weight: bold;'>{step}</div>
+                    <div>
+                        <div style='font-weight: bold; margin-bottom: 0.2rem;'>{title}</div>
+                        <div style='font-size: 0.8rem; opacity: 0.9;'>{desc}</div>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        if st.button(t('landing_start'), type="primary"):
+            st.session_state.current_step = 'test'
+            st.rerun()
+        
+        st.info(t('landing_stats'))
+
+def show_test_page():
+    # 현재 언어에 맞는 질문 가져오기
+    questions = get_questions(st.session_state.language)
+    
+    if st.session_state.current_question >= len(questions):
+        # 결과 분석
+        st.session_state.dna_result = analyze_dna(st.session_state.answers)
+        st.session_state.current_step = 'result'
+        st.rerun()
+        return
+    
+    progress = (st.session_state.current_question + 1) / len(questions)
+    st.progress(progress, text=f"{t('progress')}: {int(progress*100)}% ({st.session_state.current_question + 1}/10)")
+    
+    # 이전 버튼
+    col1, col2, col3 = st.columns([1, 4, 1])
+    with col1:
+        if st.button(t('btn_prev')):
+            if st.session_state.current_question > 0:
+                st.session_state.current_question -= 1
+                st.session_state.answers.pop()
+                st.rerun()
+            else:
+                st.session_state.current_step = 'landing'
+                st.rerun()
+    
+    # 질문 표시
+    question = questions[st.session_state.current_question]
+    
+    st.markdown(f"### {t('question')} {question['id']}/10")
+    st.markdown(f"**{question['text']}**")
+    
+    # 선택지
+    selected_option = st.radio(
+        t('select_answer'),
+        options=list(question['options'].keys()),
+        format_func=lambda x: question['options'][x],
+        key=f"q_{question['id']}"
+    )
+    
+    if st.button(t('btn_next'), type="primary"):
+        st.session_state.answers.append(selected_option)
+        st.session_state.current_question += 1
+        st.rerun()
+    
+    # 진행 상황 표시
+    if st.session_state.current_question >= 4:
+        st.success(t('dna_forming'))
+
+def show_result_page():
+    if not st.session_state.dna_result:
+        st.error("DNA 분석 결과가 없습니다.")
+        return
+    
+    # 현재 언어에 맞는 DNA 타입 데이터 가져오기
+    lang = st.session_state.language
+    dna_types = get_dna_types(lang)
+    dna_type_name = get_dna_type_name(st.session_state.dna_result, lang)
+    dna_data = dna_types[dna_type_name]
+    
+    # 뒤로가기 버튼
+    col1, col2, col3 = st.columns([1, 4, 1])
+    with col1:
+        if st.button(t('btn_prev')):
+            st.session_state.current_step = 'test'
+            st.session_state.current_question = len(questions) - 1
+            st.rerun()
+    with col3:
+        if st.button(t('btn_home')):
+            st.session_state.current_step = 'landing'
+            st.rerun()
+    
+    # 결과 카드
+    st.markdown(f"""
+    <div class='dna-card' style='background: linear-gradient(135deg, {dna_data['color']}, {dna_data['color']}dd);'>
+        <div style='font-size: 4rem; margin-bottom: 1rem;'>{dna_data['emoji']}</div>
+        <h1>{t('your_dna')}</h1>
+        <h2 style='background: rgba(255,255,255,0.2); padding: 1rem; border-radius: 20px; margin: 1rem 0;'>
+            {dna_type_name}
+        </h2>
+        <h3>{dna_data['title']}</h3>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # 설명
+    st.markdown(f"**{dna_data['description']}**")
+    
+    # 특징 태그
+    st.markdown(f"### {t('your_traits')}")
+    cols = st.columns(len(dna_data['characteristics']))
+    for i, char in enumerate(dna_data['characteristics']):
+        with cols[i]:
+            st.markdown(f"<div style='background: {dna_data['color']}20; color: {dna_data['color']}; "
+                       f"padding: 0.5rem; border-radius: 10px; text-align: center; font-weight: bold;'>"
+                       f"{char}</div>", unsafe_allow_html=True)
+    
+    # 전문가 영상
+    st.markdown(f"### {t('expert_video')}")
+    
+    # 영상 파일이 있다면 표시, 없다면 플레이스홀더
+    video_path = f"videos/{dna_data['video_file']}"
+    try:
+        st.video(video_path)
+    except:
+        st.info(f"{st.session_state.dna_result} 타입 전문가 시연 영상 (1분) - 업로드 예정")
+        st.image("https://via.placeholder.com/640x360/667eea/ffffff?text=전문가+시연+영상", 
+                caption=f"{st.session_state.dna_result} 맞춤 전통무용 스타일")
+    
+    # 액션 버튼
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button(t('start_movement'), type="primary"):
+            st.session_state.current_step = 'action_select'
+            st.rerun()
+    
+    with col2:
+        if st.button(t('share_result')):
+            st.session_state.current_step = 'meme'
+            st.rerun()
+
+def show_action_select_page():
+    # 뒤로가기 버튼
+    col1, col2, col3 = st.columns([1, 4, 1])
+    with col1:
+        if st.button(t('btn_prev')):
+            st.session_state.current_step = 'result'
+            st.rerun()
+    with col3:
+        if st.button(t('btn_home')):
+            st.session_state.current_step = 'landing'
+            st.rerun()
+    
+    st.markdown(f"## {t('movement_journey')}")
+    st.markdown(t('movement_subtitle'))
+    
+    # 기본 동작 선택
+    with st.container():
+        st.markdown(f"""
+        <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
+                    padding: 2rem; border-radius: 15px; color: white; margin: 1rem 0;'>
+            <h3>{t('basic_actions')} (12)</h3>
+            <p>{t('basic_actions_desc')}</p>
+            <small>✓ {t('ai_support')} • {t('special_meme')}</small>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        if st.button(t('start_basic'), type="primary"):
+            st.session_state.current_step = 'action'
+            st.rerun()
+    
+    # 확장 동작 선택
+    with st.container():
+        st.markdown(f"""
+        <div style='background: linear-gradient(135deg, #4ECDC4 0%, #44A08D 100%); 
+                    padding: 2rem; border-radius: 15px; color: white; margin: 1rem 0;'>
+            <h3>{t('expanded_actions')} (6)</h3>
+            <p>{t('expanded_actions_desc')}</p>
+            <small>✓ {t('expert_video')} • {t('ai_coming')}</small>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        if st.button(t('try_expanded'), key="expanded_btn"):
+            st.session_state.current_step = 'expanded_action'
+            st.rerun()
+
+    # 창작 동작 선택
+    with st.container():
+        st.markdown(f"""
+        <div style='background: linear-gradient(135deg, #FF6B35 0%, #F7931E 100%); 
+                    padding: 2rem; border-radius: 15px; color: white; margin: 1rem 0;'>
+            <h3>{t('creative_actions')} (8)</h3>
+            <p>{t('creative_actions_desc')}</p>
+            <small>✓ {t('expert_video')} • {t('ai_coming')}</small>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        if st.button(t('try_creative'), key="creative_btn"):
+            st.session_state.current_step = 'creative_action'
+            st.rerun()
+            
+    # 스토리 보기 버튼
+    if st.button(t('see_story')):
+        st.session_state.current_step = 'story'
+        st.rerun()
+
+def show_action_page():
+    # 현재 언어에 맞는 기본 동작 가져오기
+    basic_actions = get_basic_actions(st.session_state.language)
+    
+    if st.session_state.current_action >= len(basic_actions):
+        st.session_state.current_step = 'meme'
+        st.rerun()
+        return
+    
+    action = basic_actions[st.session_state.current_action]
+    progress = (st.session_state.current_action + 1) / len(basic_actions)
+    
+    # 헤더
+    col1, col2, col3 = st.columns([1, 4, 1])
+    with col1:
+        if st.button(t('btn_prev')):
+            if st.session_state.current_action > 0:
+                st.session_state.current_action -= 1
+            else:
+                st.session_state.current_step = 'action_select'
+            st.rerun()
+    
+    with col2:
+        st.markdown(f"### {action['name']} ({st.session_state.current_action + 1}/12)")
+        st.progress(progress, text=f"{t('progress')}: {int(progress*100)}%")
+    
+    with col3:
+        if st.button(t('btn_home')):
+            st.session_state.current_step = 'landing'
+            st.rerun()
+    
+    # 동작 설명
+    st.markdown(f"""
+    <div class='action-card'>
+        <h3>{action['description']}</h3>
+        <p style='font-style: italic; margin: 1rem 0;'>"{action['story_card']}"</p>
+        <small>💡 {action['historical_note']}</small>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # 영상과 웹캠
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown(f"#### {t('expert_demo')}")
+        # 영상 파일이 있다면 표시
+        video_path = f"videos/{action['video_file']}"
+        try:
+            st.video(video_path)
+        except:
+            st.info(f"{action['name']} 시범 영상 - 업로드 예정")
+            st.image("https://via.placeholder.com/320x240/f093fb/ffffff?text=시범+영상", 
+                    caption=f"{action['name']} 전문가 시연")
+    
+    with col2:
+        st.markdown(f"#### {t('your_movement')}")
+        
+        # 웹캠 입력
+        camera_input = st.camera_input(t('webcam_guide'))
+        
+        if camera_input is not None:
+            # 이미지 처리
+            image = Image.open(camera_input)
+            image_np = np.array(image)
+            
+            # MediaPipe로 동작 분석
+            pose, mp_pose = init_mediapipe()
+            
+            # RGB 변환
+            rgb_image = cv2.cvtColor(image_np, cv2.COLOR_BGR2RGB)
+            results = pose.process(rgb_image)
+            
+            if results.pose_landmarks:
+                # 동작 분석
+                analysis_result = analyze_movement(results.pose_landmarks, action['name'])
+                
+                if analysis_result['success']:
+                    st.success(f"✅ {analysis_result['message']}")
+                    st.balloons()
+                    
+                    # 완료된 동작에 추가
+                    if st.session_state.current_action not in st.session_state.completed_actions:
+                        st.session_state.completed_actions.append(st.session_state.current_action)
+                    
+                    # 다음 동작으로
+                    time.sleep(2)
+                    st.session_state.current_action += 1
+                    st.rerun()
+                else:
+                    st.warning(f"⚠️ {analysis_result['message']}")
+            else:
+                st.info("자세를 인식할 수 없습니다. 전신이 보이도록 해주세요.")
+    
+    # 수동 진행 버튼 (테스트용)
+    if st.button(t('action_complete_manual'), help=t('ai_judgement')):
+        if st.session_state.current_action not in st.session_state.completed_actions:
+            st.session_state.completed_actions.append(st.session_state.current_action)
+        
+        st.session_state.current_action += 1
+        if st.session_state.current_action >= len(basic_actions):
+            st.session_state.current_step = 'meme'
+        st.rerun()
+    
+    # 배지 체크
+    completed_count = len(st.session_state.completed_actions)
+    badge_system = get_badge_system(st.session_state.language)
+    if completed_count in badge_system and completed_count not in st.session_state.badges:
+        badge = badge_system[completed_count]
+        st.session_state.badges.append(completed_count)
+        st.success(f"{badge['emoji']} {badge['name']} {t('badge_earned')} {badge['message']}")
+
+def show_expanded_action_page():
+    # 현재 언어에 맞는 확장 동작 가져오기
+    expanded_actions = get_expanded_actions(st.session_state.language)
+    
+    if st.session_state.current_expanded_action >= len(expanded_actions):
+        st.success(t('all_complete'))
+        if st.button(t('back_to_select'), type="primary"):
+            st.session_state.current_step = 'action_select'
+            st.rerun()
+        return
+    
+    action = expanded_actions[st.session_state.current_expanded_action]
+    progress = (st.session_state.current_expanded_action + 1) / len(expanded_actions)
+    
+    # 헤더
+    col1, col2, col3 = st.columns([1, 4, 1])
+    with col1:
+        if st.button(t('btn_prev')):
+            if st.session_state.current_expanded_action > 0:
+                st.session_state.current_expanded_action -= 1
+            else:
+                st.session_state.current_step = 'action_select'
+            st.rerun()
+    
+    with col2:
+        st.markdown(f"### {action['name']} ({st.session_state.current_expanded_action + 1}/6)")
+        st.progress(progress, text=f"{t('progress')}: {int(progress*100)}%")
+    
+    with col3:
+        if st.button(t('btn_home')):
+            st.session_state.current_step = 'landing'
+            st.rerun()
+    
+    # 동작 설명
+    st.markdown(f"""
+    <div class='action-card'>
+        <h3>{action['description']}</h3>
+        <p style='font-style: italic; margin: 1rem 0;'>"{action['story_card']}"</p>
+        <small>💡 {action['historical_note']}</small>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # 영상과 웹캠
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown(f"#### {t('expert_demo')}")
+        video_path = f"videos/{action['video_file']}"
+        try:
+            st.video(video_path)
+        except:
+            st.info(f"{action['name']} 시범 영상 - 업로드 예정")
+            st.image("https://via.placeholder.com/320x240/4ECDC4/ffffff?text=시범+영상", 
+                    caption=f"{action['name']} 전문가 시연")
+    
+    with col2:
+        st.markdown(f"#### {t('your_movement')}")
+        
+        # 웹캠 입력
+        camera_input = st.camera_input(t('webcam_guide'))
+        
+        if camera_input is not None:
+            # 이미지 처리
+            image = Image.open(camera_input)
+            image_np = np.array(image)
+            
+            # MediaPipe로 동작 분석
+            pose, mp_pose = init_mediapipe()
+            
+            # RGB 변환
+            rgb_image = cv2.cvtColor(image_np, cv2.COLOR_BGR2RGB)
+            results = pose.process(rgb_image)
+            
+            if results.pose_landmarks:
+                # 동작 분석
+                analysis_result = analyze_movement(results.pose_landmarks, action['name'])
+                
+                if analysis_result['success']:
+                    st.success(f"✅ {analysis_result['message']}")
+                    st.balloons()
+                    
+                    # 다음 동작으로
+                    time.sleep(2)
+                    st.session_state.current_expanded_action += 1
+                    st.rerun()
+                else:
+                    st.warning(f"⚠️ {analysis_result['message']}")
+            else:
+                st.info("자세를 인식할 수 없습니다. 전신이 보이도록 해주세요.")
+    
+    # 수동 진행 버튼 (테스트용)
+    if st.button(t('action_complete_manual'), help=t('ai_judgement')):
+        st.session_state.current_expanded_action += 1
+        st.rerun()
+
+def show_creative_action_page():
+    # 현재 언어에 맞는 창작 동작 가져오기
+    creative_actions = get_creative_actions(st.session_state.language)
+    
+    if st.session_state.current_creative_action >= len(creative_actions):
+        st.success(t('all_complete'))
+        if st.button(t('back_to_select'), type="primary"):
+            st.session_state.current_step = 'action_select'
+            st.rerun()
+        return
+    
+    action = creative_actions[st.session_state.current_creative_action]
+    progress = (st.session_state.current_creative_action + 1) / len(creative_actions)
+    
+    # 헤더
+    col1, col2, col3 = st.columns([1, 4, 1])
+    with col1:
+        if st.button(t('btn_prev')):
+            if st.session_state.current_creative_action > 0:
+                st.session_state.current_creative_action -= 1
+            else:
+                st.session_state.current_step = 'action_select'
+            st.rerun()
+    
+    with col2:
+        st.markdown(f"### {action['name']} ({st.session_state.current_creative_action + 1}/8)")
+        st.progress(progress, text=f"{t('progress')}: {int(progress*100)}%")
+    
+    with col3:
+        if st.button(t('btn_home')):
+            st.session_state.current_step = 'landing'
+            st.rerun()
+    
+    # 동작 설명
+    st.markdown(f"""
+    <div class='action-card'>
+        <h3>{action['description']}</h3>
+        <p style='font-style: italic; margin: 1rem 0;'>"{action['story_card']}"</p>
+        <small>💡 {action['historical_note']}</small>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # 영상과 웹캠
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("#### 전문가 시범")
+        video_path = f"videos/{action['video_file']}"
+        try:
+            st.video(video_path)
+        except:
+            st.info(f"{action['name']} 시범 영상 - 업로드 예정")
+            st.image("https://via.placeholder.com/320x240/FF6B35/ffffff?text=시범+영상", 
+                    caption=f"{action['name']} 창작 시연")
+    
+    with col2:
+        st.markdown(f"#### {t('your_movement')}")
+        
+        # 웹캠 입력
+        camera_input = st.camera_input(t('webcam_guide'))
+        
+        if camera_input is not None:
+            # 이미지 처리
+            image = Image.open(camera_input)
+            image_np = np.array(image)
+            
+            # MediaPipe로 동작 분석
+            pose, mp_pose = init_mediapipe()
+            
+            # RGB 변환
+            rgb_image = cv2.cvtColor(image_np, cv2.COLOR_BGR2RGB)
+            results = pose.process(rgb_image)
+            
+            if results.pose_landmarks:
+                # 동작 분석
+                analysis_result = analyze_movement(results.pose_landmarks, action['name'])
+                
+                if analysis_result['success']:
+                    st.success(f"✅ {analysis_result['message']}")
+                    st.balloons()
+                    
+                    # 다음 동작으로
+                    time.sleep(2)
+                    st.session_state.current_creative_action += 1
+                    st.rerun()
+                else:
+                    st.warning(f"⚠️ {analysis_result['message']}")
+            else:
+                st.info("자세를 인식할 수 없습니다. 전신이 보이도록 해주세요.")
+    
+    # 수동 진행 버튼 (테스트용)
+    if st.button(t('action_complete_manual'), help=t('ai_judgement')):
+        st.session_state.current_creative_action += 1
+        st.rerun()
+
+def show_story_page():
+    # 현재 언어에 맞는 스토리 가져오기
+    story_contents = get_story_contents(st.session_state.language)
+    
+    # 뒤로가기 버튼
+    col1, col2, col3 = st.columns([1, 4, 1])
+    with col1:
+        if st.button(t('btn_prev')):
+            st.session_state.current_step = 'action_select'
+            st.rerun()
+    with col3:
+        if st.button(t('btn_home')):
+            st.session_state.current_step = 'landing'
+            st.rerun()
+    
+    st.markdown(f"## {t('story_title')}")
+    st.markdown(t('story_subtitle'))
+    
+    # 스토리 목록
+    for index, story in enumerate(story_contents):
+        with st.expander(f"{story['avatar']} {story['title']}", expanded=False):
+            st.markdown(story['content'])
+            
+            if story.get('historical_note'):
+                st.info(f"**{t('historical_background')}**: {story['historical_note']}")
+            
+            if st.button(t('view_detail'), key=f"story_{index}"):
+                st.session_state.current_story = index
+                st.session_state.current_step = 'story_detail'
+                st.rerun()
+    
+    # 체험하기 버튼
+    if st.button(t('try_now'), type="primary"):
+        st.session_state.current_step = 'action_select'
+        st.rerun()
+
+def show_story_detail_page():
+    # 현재 언어에 맞는 스토리 가져오기
+    story_contents = get_story_contents(st.session_state.language)
+    story = story_contents[st.session_state.current_story]
+    
+    # 뒤로가기 버튼
+    col1, col2, col3 = st.columns([1, 4, 1])
+    with col1:
+        if st.button("← 목록으로"):
+            st.session_state.current_step = 'story'
+            st.rerun()
+    with col3:
+        if st.button(t('btn_home')):
+            st.session_state.current_step = 'landing'
+            st.rerun()
+    
+    # 스토리 헤더
+    st.markdown(f"# {story['avatar']} {story['title']}")
+    
+    # 내용
+    st.markdown(story['content'])
+    
+    # 역사적 배경
+    if story.get('historical_note'):
+        st.markdown(f"### {t('historical_background')}")
+        st.info(story['historical_note'])
+    
+    # 네비게이션
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.session_state.current_story > 0:
+            if st.button("← 이전 이야기"):
+                st.session_state.current_story -= 1
+                st.rerun()
+    
+    with col2:
+        st.write(f"{st.session_state.current_story + 1} / {len(story_contents)}")
+    
+    with col3:
+        if st.session_state.current_story < len(story_contents) - 1:
+            if st.button("다음 이야기 →"):
+                st.session_state.current_story += 1
+                st.rerun()
+    
+    # 체험하기 버튼
+    st.markdown("---")
+    if st.button(t('try_now'), type="primary"):
+        st.session_state.current_step = 'action_select'
+        st.rerun()
+
+def show_meme_page():
+    if not st.session_state.dna_result:
+        st.error("DNA 결과가 없습니다.")
+        return
+    
+    # 현재 언어에 맞는 DNA 타입 데이터 가져오기
+    lang = st.session_state.language
+    dna_types = get_dna_types(lang)
+    dna_type_name = get_dna_type_name(st.session_state.dna_result, lang)
+    dna_data = dna_types[dna_type_name]
+    badge_system = get_badge_system(lang)
+    
+    completed_count = len(st.session_state.completed_actions)
+    is_full_complete = completed_count == len(basic_actions)
+    
+    # 네비게이션
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        if st.button(t('btn_home')):
+            st.session_state.current_step = 'landing'
+            st.rerun()
+    with col2:
+        if st.button(t('view_dna_result')):
+            st.session_state.current_step = 'result'
+            st.rerun()
+    with col3:
+        if st.button(t('practice_movement')):
+            st.session_state.current_step = 'action_select'
+            st.rerun()
+    
+    # 완성 축하
+    st.markdown(f"""
+    <div class='dna-card' style='background: linear-gradient(135deg, {dna_data['color']}, {dna_data['color']}dd);'>
+        <div style='font-size: 3rem; margin-bottom: 1rem;'>🎉</div>
+        <h1>{t('dna_awakened') if is_full_complete else f'{completed_count}{t("actions_completed")}'}</h1>
+        <p>{t('awakened_msg') if is_full_complete else t('share_journey')}</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # 밈 카드 유형 선택
+    st.markdown(f"### {t('meme_type')}")
+    
+    meme_type = st.radio(
+        t('meme_format'),
+        [t('static_image'), t('animated_gif')],
+        horizontal=True,
+        help="정적 이미지는 빠르고 용량이 작으며, GIF는 움직여서 더 눈에 띕니다"
+    )
+    
+    # 스타일 선택
+    if meme_type == t('static_image'):
+        style_option = st.selectbox(
+            t('select_style'),
+            [
+                t('style_a'),
+                t('style_b'),
+                t('style_c'),
+                t('style_d')
+            ],
+            index=0,
+            help="각 스타일마다 다른 시각적 효과가 적용됩니다"
+        )
+        
+        # 스타일에 따라 다른 밈 카드 생성
+        if style_option == t('style_a'):
+            meme_card = create_meme_card_gradient_box(dna_type_name, dna_data)
+        elif style_option == t('style_b'):
+            meme_card = create_meme_card_neon(dna_type_name, dna_data)
+        elif style_option == t('style_c'):
+            meme_card = create_meme_card_dualtone(dna_type_name, dna_data)
+        elif style_option == t('style_d'):
+            meme_card = create_meme_card_minimal(dna_type_name, dna_data)
+        else:
+            meme_card = create_meme_card(dna_type_name, dna_data)
+        
+        # 밈 카드 표시
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            st.image(meme_card, caption=f"{dna_type_name} {t('static_image')}")
+    
+    else:  # GIF 모드
+        # GIF 설정
+        col1, col2 = st.columns(2)
+        with col1:
+            gif_duration = st.slider(t('gif_length'), 2, 5, 3, help="GIF 영상의 길이를 설정합니다")
+        with col2:
+            style_options = [t('style_gradient'), t('style_neon'), t('style_dualtone'), t('style_minimal')]
+            gif_style = st.selectbox(
+                t('gif_style'),
+                style_options,
+                help="GIF에 적용할 스타일을 선택합니다"
+            )
+        
+        # 스타일 매핑 (한국어와 영어 모두 지원)
+        style_map = {
+            t('style_gradient'): "gradient",
+            t('style_neon'): "neon",
+            t('style_dualtone'): "dualtone",
+            t('style_minimal'): "minimal"
+        }
+        
+        # GIF 생성 버튼
+        if st.button(t('generate_gif'), type="primary"):
+            with st.spinner(f"멋진 {gif_duration}초 GIF를 생성 중입니다... 잠시만 기다려주세요!"):
+                gif_buffer = create_meme_gif(
+                    dna_type_name, 
+                    dna_data, 
+                    duration=gif_duration,
+                    fps=10,
+                    style=style_map[gif_style]
+                )
+                
+                if gif_buffer:
+                    st.session_state.generated_gif = gif_buffer
+                    st.success("✨ GIF가 생성되었습니다!")
+                else:
+                    st.error("GIF 생성에 실패했습니다. 다시 시도해주세요.")
+        
+        # 생성된 GIF 표시
+        if 'generated_gif' in st.session_state and st.session_state.generated_gif:
+            col1, col2, col3 = st.columns([1, 2, 1])
+            with col2:
+                st.image(st.session_state.generated_gif, caption=f"{st.session_state.dna_result} GIF 밈")
+                st.info("💡 GIF는 자동으로 반복 재생됩니다")
+    
+    # 공유 버튼들
+    st.markdown(f"### {t('share_result')}")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if meme_type == t('static_image'):
+            # 이미지를 바이트로 변환
+            buf = io.BytesIO()
+            meme_card.save(buf, format='PNG', quality=95)
+            byte_im = buf.getvalue()
+            
+            st.download_button(
+                label=t('download_png'),
+                data=byte_im,
+                file_name=f"choomaru_{dna_type_name.replace(' ', '_')}.png",
+                mime="image/png",
+                type="primary",
+                help="밈 카드를 PNG 파일로 다운로드합니다"
+            )
+        else:  # GIF 모드
+            if 'generated_gif' in st.session_state and st.session_state.generated_gif:
+                st.download_button(
+                    label=t('download_gif'),
+                    data=st.session_state.generated_gif.getvalue(),
+                    file_name=f"choomaru_{dna_type_name.replace(' ', '_')}.gif",
+                    mime="image/gif",
+                    type="primary",
+                    help="움직이는 밈 카드를 GIF 파일로 다운로드합니다"
+                )
+            else:
+                st.info(t('press_button_first'))
+    
+    with col2:
+        if st.button(t('share_guide')):
+            if meme_type == "정적 이미지 (PNG)":
+                st.info("💡 다운로드한 이미지를 인스타그램, 페이스북, 트위터 등에 자유롭게 공유하세요!\n\n추천 해시태그: #춤마루 #K_DNA각성 #한국무용")
+            else:
+                st.info("💡 GIF는 인스타그램 스토리, 페이스북, 트위터에서 자동으로 재생됩니다!\n\n추천 플랫폼: 인스타그램 스토리, 트위터, 텔레그램\n\n추천 해시태그: #춤마루 #K_DNA각성 #한국무용")
+    
+    # 배지 표시
+    if st.session_state.badges:
+        st.markdown(f"### {t('earned_badges')}")
+        badge_cols = st.columns(len(st.session_state.badges))
+        for i, badge_count in enumerate(st.session_state.badges):
+            badge = badge_system[badge_count]
+            with badge_cols[i]:
+                st.markdown(f"""
+                <div style='text-align: center; padding: 1rem; background: {badge['color']}20; 
+                           border-radius: 10px; color: {badge['color']};'>
+                    <div style='font-size: 2rem;'>{badge['emoji']}</div>
+                    <div style='font-weight: bold;'>{badge['name']}</div>
+                </div>
+                """, unsafe_allow_html=True)
+    
+    # 재시작 및 추가 액션
+    st.markdown("---")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        if st.button(t('new_dna')):
+            # 세션 초기화
+            for key in ['current_step', 'answers', 'current_question', 'dna_result', 
+                       'completed_actions', 'current_action', 'badges', 'consecutive_success']:
+                if key in st.session_state:
+                    if key == 'current_step':
+                        st.session_state[key] = 'landing'
+                    elif key in ['answers', 'completed_actions', 'badges']:
+                        st.session_state[key] = []
+                    else:
+                        st.session_state[key] = 0
+            st.rerun()
+    
+    with col2:
+        if not is_full_complete:
+            if st.button(t('continue_actions')):
+                st.session_state.current_step = 'action'
+                st.rerun()
+    
+    with col3:
+        if st.button(t('see_stories')):
+            st.session_state.current_step = 'story'
+            st.rerun()
+    
+    # 성취 메시지
+    success_message = (
+        t('success_full')
+        if is_full_complete else
+        t('success_partial').format(count=completed_count)
+    )
+    
+    st.success(success_message)
+
+if __name__ == "__main__":
+    main()
+
+# 실행방법:
+# pip install streamlit opencv-python mediapipe pillow numpy
+# streamlit run app_v8.py
