@@ -184,22 +184,6 @@ TRANSLATIONS = {
         'congrats_share': '밈을 다운로드해서 친구들과 공유해보세요!',
         'success_full': '축하합니다! 한국무용의 12가지 기본 동작을 모두 완주하셨습니다. 당신은 이제 진정한 K-DNA 마스터입니다. 5000년 전통의 움직임이 당신 안에서 살아 숨쉬고 있어요.',
         'success_partial': '잘하고 있어요! 이미 {count}개의 동작을 마스터했습니다. 계속해서 나만의 춤 DNA를 깨워나가고 있어요.',
-        
-        # DNA 갤러리
-        'dna_gallery_title': '🎭 8가지 K-DNA 타입 갤러리',
-        'dna_gallery_subtitle': '당신의 춤 성향은 어떤 타입일까요? 8가지 DNA 타입을 모두 만나보세요',
-        'all_dna_types': '모든 DNA 타입',
-        'explore_all_dna': '🎭 모든 DNA 타입 탐색',
-        'other_dna_types': '🔍 다른 DNA 타입도 궁금하신가요?',
-        'view_all_gallery': '전체 갤러리 보기',
-        'click_to_watch': '클릭하여 영상 보기',
-        
-        # 전통무용 아카이브
-        'traditional_archive_title': '🎬 전통무용 아카이브',
-        'traditional_archive_subtitle': '5000년 역사와 함께하는 전통무용 영상 컬렉션',
-        'video_section': '영상 섹션',
-        'coming_soon': '곧 공개됩니다',
-        'archive_desc': '한국무용의 역사와 이야기가 담긴 영상들을 만나보세요',
     },
     'en': {
         # Common
@@ -334,22 +318,6 @@ TRANSLATIONS = {
         'congrats_share': 'Download your meme and share it with friends!',
         'success_full': 'Congratulations! You have completed all 12 basic Korean dance movements. You are now a true K-DNA master. 5000 years of traditional movement lives and breathes within you.',
         'success_partial': 'Great job! You have already mastered {count} movements. Keep awakening your unique dance DNA.',
-        
-        # DNA Gallery
-        'dna_gallery_title': '🎭 8 K-DNA Types Gallery',
-        'dna_gallery_subtitle': 'What is your dance personality? Explore all 8 DNA types',
-        'all_dna_types': 'All DNA Types',
-        'explore_all_dna': '🎭 Explore All DNA Types',
-        'other_dna_types': '🔍 Curious about other DNA types?',
-        'view_all_gallery': 'View Full Gallery',
-        'click_to_watch': 'Click to watch video',
-        
-        # Traditional Archive
-        'traditional_archive_title': '🎬 Traditional Dance Archive',
-        'traditional_archive_subtitle': 'Traditional dance video collection with 5000 years of history',
-        'video_section': 'Video Section',
-        'coming_soon': 'Coming Soon',
-        'archive_desc': 'Discover videos containing the history and stories of Korean dance',
     }
 }
 
@@ -711,7 +679,7 @@ dna_types_ko = {
         "description": "어디서든 춤을 통해 긍정적인 에너지를 발산하는 당신. 춤을 배우는 것보다 그저 신나게 즐기는 것에 더 큰 의미를 두는 유형입니다.",
         "characteristics": ["자유분방", "열정", "긍정성", "에너지 전달"],
         "color": "#FF4500",
-        "video_file": "dna-types/fun-explorer.mp4"
+        "video_file": "dna-types/fun-exploder.mp4"
     }
 }
 
@@ -779,7 +747,7 @@ dna_types_en = {
         "description": "You radiate positive energy through dance anywhere. You find more meaning in simply enjoying energetically than learning dance.",
         "characteristics": ["Free-spirited", "Passion", "Positivity", "Energy Transfer"],
         "color": "#FF4500",
-        "video_file": "dna-types/fun-explorer.mp4"
+        "video_file": "dna-types/fun-exploder.mp4"
     }
 }
 
@@ -2382,12 +2350,6 @@ def main():
         if new_lang != st.session_state.language:
             st.session_state.language = new_lang
             st.rerun()
-        
-        # DNA 갤러리 메뉴
-        st.markdown("---")
-        if st.button(t('explore_all_dna'), use_container_width=True):
-            st.session_state.current_step = 'dna_gallery'
-            st.rerun()
     
     # 헤더
     st.markdown(f"""
@@ -2404,8 +2366,6 @@ def main():
         show_test_page()
     elif st.session_state.current_step == 'result':
         show_result_page()
-    elif st.session_state.current_step == 'dna_gallery':
-        show_dna_gallery_page()
     elif st.session_state.current_step == 'action_select':
         show_action_select_page()
     elif st.session_state.current_step == 'action':
@@ -2573,40 +2533,6 @@ def show_result_page():
         st.info(f"{st.session_state.dna_result} 타입 전문가 시연 영상 (1분) - 업로드 예정")
         st.image("https://via.placeholder.com/640x360/667eea/ffffff?text=전문가+시연+영상", 
                 caption=f"{st.session_state.dna_result} 맞춤 전통무용 스타일")
-    
-    # 다른 DNA 타입도 보기
-    st.markdown("---")
-    with st.expander(t('other_dna_types')):
-        st.markdown(t('dna_gallery_subtitle'))
-        
-        # 현재 DNA 타입을 제외한 나머지 7개 타입 표시
-        other_types = [name for name in dna_types.keys() if name != dna_type_name]
-        
-        # 2개씩 컬럼으로 표시
-        for i in range(0, len(other_types), 2):
-            cols = st.columns(2)
-            for j, col in enumerate(cols):
-                if i + j < len(other_types):
-                    other_name = other_types[i + j]
-                    other_data = dna_types[other_name]
-                    
-                    with col:
-                        st.markdown(f"""
-                        <div style='background: linear-gradient(135deg, {other_data['color']}, {other_data['color']}dd);
-                                    padding: 1rem; border-radius: 10px; color: white; text-align: center;
-                                    margin-bottom: 0.5rem;'>
-                            <div style='font-size: 2rem;'>{other_data['emoji']}</div>
-                            <h4 style='margin: 0.3rem 0;'>{other_name}</h4>
-                            <p style='font-size: 0.8rem; margin: 0;'>{other_data['title']}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        st.markdown(f"*{other_data['description'][:80]}...*")
-                        st.markdown("")
-        
-        # 전체 갤러리 보기 버튼
-        if st.button(t('view_all_gallery'), type="secondary", use_container_width=True):
-            st.session_state.current_step = 'dna_gallery'
-            st.rerun()
     
     # 액션 버튼
     col1, col2 = st.columns(2)
@@ -2998,195 +2924,6 @@ def show_creative_action_page():
         st.session_state.current_creative_action += 1
         st.rerun()
 
-def show_dna_gallery_page():
-    """DNA 갤러리 페이지 - 8가지 DNA 타입을 모두 보여줌"""
-    # 뒤로가기 버튼
-    col1, col2, col3 = st.columns([1, 4, 1])
-    with col1:
-        if st.button(t('btn_prev')):
-            # 이전 페이지 추적 (result나 landing으로 돌아가기)
-            if st.session_state.dna_result:
-                st.session_state.current_step = 'result'
-            else:
-                st.session_state.current_step = 'landing'
-            st.rerun()
-    with col3:
-        if st.button(t('btn_home')):
-            st.session_state.current_step = 'landing'
-            st.rerun()
-    
-    # 페이지 헤더
-    st.markdown(f"## {t('dna_gallery_title')}")
-    st.markdown(t('dna_gallery_subtitle'))
-    st.markdown("---")
-    
-    # 현재 언어에 맞는 DNA 타입 데이터 가져오기
-    lang = st.session_state.language
-    dna_types = get_dna_types(lang)
-    
-    # 8가지 DNA 타입을 2개씩 3행으로 배치 (마지막 행은 4개)
-    dna_type_names = list(dna_types.keys())
-    
-    # 첫 번째 행 (2개)
-    cols = st.columns(2)
-    for i in range(2):
-        if i < len(dna_type_names):
-            dna_name = dna_type_names[i]
-            dna_data = dna_types[dna_name]
-            
-            with cols[i]:
-                # DNA 타입 카드
-                st.markdown(f"""
-                <div style='background: linear-gradient(135deg, {dna_data['color']}, {dna_data['color']}dd);
-                            padding: 1.5rem; border-radius: 15px; color: white; text-align: center;
-                            margin-bottom: 1rem; min-height: 150px;'>
-                    <div style='font-size: 3rem; margin-bottom: 0.5rem;'>{dna_data['emoji']}</div>
-                    <h3 style='margin: 0.5rem 0;'>{dna_name}</h3>
-                    <p style='font-size: 0.9rem; margin: 0;'>{dna_data['title']}</p>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # 특징 표시
-                st.markdown(f"**{t('your_traits')}**")
-                for char in dna_data['characteristics']:
-                    st.markdown(f"- {char}")
-                
-                # 설명
-                with st.expander(t('view_detail')):
-                    st.markdown(dna_data['description'])
-                
-                # 영상
-                video_path = f"videos/{dna_data['video_file']}"
-                try:
-                    st.video(video_path)
-                except:
-                    st.info(f"{t('expert_video')} - {t('coming_soon')}")
-                
-                st.markdown("---")
-    
-    # 두 번째 행 (2개)
-    cols = st.columns(2)
-    for i in range(2, 4):
-        if i < len(dna_type_names):
-            dna_name = dna_type_names[i]
-            dna_data = dna_types[dna_name]
-            
-            with cols[i-2]:
-                # DNA 타입 카드
-                st.markdown(f"""
-                <div style='background: linear-gradient(135deg, {dna_data['color']}, {dna_data['color']}dd);
-                            padding: 1.5rem; border-radius: 15px; color: white; text-align: center;
-                            margin-bottom: 1rem; min-height: 150px;'>
-                    <div style='font-size: 3rem; margin-bottom: 0.5rem;'>{dna_data['emoji']}</div>
-                    <h3 style='margin: 0.5rem 0;'>{dna_name}</h3>
-                    <p style='font-size: 0.9rem; margin: 0;'>{dna_data['title']}</p>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # 특징 표시
-                st.markdown(f"**{t('your_traits')}**")
-                for char in dna_data['characteristics']:
-                    st.markdown(f"- {char}")
-                
-                # 설명
-                with st.expander(t('view_detail')):
-                    st.markdown(dna_data['description'])
-                
-                # 영상
-                video_path = f"videos/{dna_data['video_file']}"
-                try:
-                    st.video(video_path)
-                except:
-                    st.info(f"{t('expert_video')} - {t('coming_soon')}")
-                
-                st.markdown("---")
-    
-    # 세 번째 행 (2개)
-    cols = st.columns(2)
-    for i in range(4, 6):
-        if i < len(dna_type_names):
-            dna_name = dna_type_names[i]
-            dna_data = dna_types[dna_name]
-            
-            with cols[i-4]:
-                # DNA 타입 카드
-                st.markdown(f"""
-                <div style='background: linear-gradient(135deg, {dna_data['color']}, {dna_data['color']}dd);
-                            padding: 1.5rem; border-radius: 15px; color: white; text-align: center;
-                            margin-bottom: 1rem; min-height: 150px;'>
-                    <div style='font-size: 3rem; margin-bottom: 0.5rem;'>{dna_data['emoji']}</div>
-                    <h3 style='margin: 0.5rem 0;'>{dna_name}</h3>
-                    <p style='font-size: 0.9rem; margin: 0;'>{dna_data['title']}</p>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # 특징 표시
-                st.markdown(f"**{t('your_traits')}**")
-                for char in dna_data['characteristics']:
-                    st.markdown(f"- {char}")
-                
-                # 설명
-                with st.expander(t('view_detail')):
-                    st.markdown(dna_data['description'])
-                
-                # 영상
-                video_path = f"videos/{dna_data['video_file']}"
-                try:
-                    st.video(video_path)
-                except:
-                    st.info(f"{t('expert_video')} - {t('coming_soon')}")
-                
-                st.markdown("---")
-    
-    # 네 번째 행 (2개)
-    cols = st.columns(2)
-    for i in range(6, 8):
-        if i < len(dna_type_names):
-            dna_name = dna_type_names[i]
-            dna_data = dna_types[dna_name]
-            
-            with cols[i-6]:
-                # DNA 타입 카드
-                st.markdown(f"""
-                <div style='background: linear-gradient(135deg, {dna_data['color']}, {dna_data['color']}dd);
-                            padding: 1.5rem; border-radius: 15px; color: white; text-align: center;
-                            margin-bottom: 1rem; min-height: 150px;'>
-                    <div style='font-size: 3rem; margin-bottom: 0.5rem;'>{dna_data['emoji']}</div>
-                    <h3 style='margin: 0.5rem 0;'>{dna_name}</h3>
-                    <p style='font-size: 0.9rem; margin: 0;'>{dna_data['title']}</p>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # 특징 표시
-                st.markdown(f"**{t('your_traits')}**")
-                for char in dna_data['characteristics']:
-                    st.markdown(f"- {char}")
-                
-                # 설명
-                with st.expander(t('view_detail')):
-                    st.markdown(dna_data['description'])
-                
-                # 영상
-                video_path = f"videos/{dna_data['video_file']}"
-                try:
-                    st.video(video_path)
-                except:
-                    st.info(f"{t('expert_video')} - {t('coming_soon')}")
-                
-                st.markdown("---")
-    
-    # 하단 액션 버튼
-    st.markdown("---")
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button(t('landing_start'), type="primary", use_container_width=True):
-            st.session_state.current_step = 'test'
-            st.rerun()
-    with col2:
-        if st.button(t('see_story'), use_container_width=True):
-            st.session_state.current_step = 'story'
-            st.rerun()
-
 def show_story_page():
     # 현재 언어에 맞는 스토리 가져오기
     story_contents = get_story_contents(st.session_state.language)
@@ -3217,51 +2954,6 @@ def show_story_page():
                 st.session_state.current_story = index
                 st.session_state.current_step = 'story_detail'
                 st.rerun()
-    
-    # 전통무용 아카이브 섹션
-    st.markdown("---")
-    st.markdown(f"## {t('traditional_archive_title')}")
-    st.markdown(t('traditional_archive_subtitle'))
-    
-    # Placeholder 안내
-    st.info(f"""
-    💡 **{t('coming_soon')}**
-    
-    {t('archive_desc')}
-    
-    이 섹션은 다음과 같은 콘텐츠로 채워질 예정입니다:
-    - 🏰 궁중의 비밀 - 왕실이 춤춘 이유
-    - 🎭 민초의 신명 - 억압 속에서 피어난 춤
-    - 🙏 신을 부르는 몸짓 - 종교와 춤의 만남
-    - ⚔️ 금지된 춤의 부활 - 잊혀질 뻔한 동작들
-    - 👘 한복과 춤의 공생 - 옷이 만든 움직임
-    - 🎤 K-pop이 훔쳐간 동작 - 전통이 살아있는 현장
-    
-    각 섹션에는 관련 전통무용 영상과 스토리가 함께 제공됩니다.
-    """)
-    
-    # 샘플 구조 (향후 콘텐츠로 대체 예정)
-    with st.expander("📺 영상 섹션 구조 미리보기 (개발용)", expanded=False):
-        st.markdown("""
-        ### 구조 예시
-        
-        각 테마별로 다음과 같은 구조를 가집니다:
-        
-        1. **테마 제목** (예: 🏰 궁중의 비밀)
-        2. **짧은 스토리** (100-200자)
-        3. **관련 동작 영상** (basic-actions, expanded-actions, creative-actions 폴더)
-        4. **현대 연결고리** (K-pop, 현대 문화와의 연결)
-        5. **역사적 배경** (심화 학습)
-        
-        ### 영상 탑재 방식
-        - videos/basic-actions/ (12개 영상)
-        - videos/expanded-actions/ (6개 영상)
-        - videos/creative-actions/ (8개 영상)
-        
-        이 영상들을 테마에 맞게 재배치하여 스토리텔링과 함께 제공합니다.
-        """)
-    
-    st.markdown("---")
     
     # 체험하기 버튼
     if st.button(t('try_now'), type="primary"):
