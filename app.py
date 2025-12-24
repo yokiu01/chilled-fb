@@ -3032,13 +3032,17 @@ def show_test_page():
 
 def get_videos():
     try:
+        # Secrets에 설정된 정보를 사용하여 구글 시트에 연결합니다.
         conn = st.connection("gsheets", type=GSheetsConnection)
-        df = conn.read(worksheet="videos")
+        
+        # 'videos'라는 이름의 탭에서 데이터를 읽어옵니다.
+        df = conn.read(worksheet="videos", ttl="10m") 
         return df
     except Exception as e:
+        # 이 부분이 image_534dab.png에 나타난 오류 메시지를 출력합니다.
         st.error(f"영상을 불러오는 중 오류가 발생했습니다: {e}")
         return None
-
+   
 def show_result_page():
     if not st.session_state.dna_result:
         st.error("DNA 분석 결과가 없습니다.")
