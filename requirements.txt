@@ -1,6 +1,7 @@
 streamlit
-streamlit-gsheets
+streamlit-gsheets-connection
 pandas
 opencv-python-headless
 mediapipe
+
 Pillow
