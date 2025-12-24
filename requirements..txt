@@ -1,0 +1,6 @@
+streamlit
+streamlit-gsheets
+pandas
+opencv-python-headless
+mediapipe
+Pillow
