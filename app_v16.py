@@ -5063,6 +5063,49 @@ def draw_landmarks_on_image(rgb_image, detection_result):
 
     return annotated_image
 
+def draw_hands_on_image(rgb_image, detection_result):
+    """MediaPipe Hands 랜드마크를 이미지에 그리기"""
+    hand_landmarks_list = detection_result.hand_landmarks
+    annotated_image = np.copy(rgb_image)
+
+    if not hand_landmarks_list:
+        return annotated_image
+
+    height, width, _ = annotated_image.shape
+
+    # Hand 연결선 정의 (MediaPipe Hands 21개 랜드마크 기준)
+    HAND_CONNECTIONS = [
+        # 손바닥
+        (0, 1), (1, 2), (2, 3), (3, 4),      # 엄지
+        (0, 5), (5, 6), (6, 7), (7, 8),      # 검지
+        (0, 9), (9, 10), (10, 11), (11, 12), # 중지
+        (0, 13), (13, 14), (14, 15), (15, 16), # 약지
+        (0, 17), (17, 18), (18, 19), (19, 20), # 새끼
+        (5, 9), (9, 13), (13, 17)            # 손바닥 연결
+    ]
+
+    # 각 손의 랜드마크를 순회
+    for hand_landmarks in hand_landmarks_list:
+        # 연결선 그리기
+        for connection in HAND_CONNECTIONS:
+            start_idx, end_idx = connection
+            if start_idx < len(hand_landmarks) and end_idx < len(hand_landmarks):
+                start_landmark = hand_landmarks[start_idx]
+                end_landmark = hand_landmarks[end_idx]
+
+                start_point = (int(start_landmark.x * width), int(start_landmark.y * height))
+                end_point = (int(end_landmark.x * width), int(end_landmark.y * height))
+                cv2.line(annotated_image, start_point, end_point, (255, 0, 255), 2)  # 마젠타색
+
+        # 랜드마크 점 그리기
+        for landmark in hand_landmarks:
+            x = int(landmark.x * width)
+            y = int(landmark.y * height)
+            cv2.circle(annotated_image, (x, y), 4, (0, 0, 255), -1)  # 빨간색
+            cv2.circle(annotated_image, (x, y), 4, (255, 255, 0), 1)  # 노란색 테두리
+
+    return annotated_image
+
 def show_pose_test_page():
     """MediaPipe를 활용한 실시간 자세 감지 페이지"""
     st.markdown("""
@@ -5075,6 +5118,8 @@ def show_pose_test_page():
     # 세션 상태 초기화
     if 'pose_landmarks_data' not in st.session_state:
         st.session_state.pose_landmarks_data = []
+    if 'hand_landmarks_data' not in st.session_state:
+        st.session_state.hand_landmarks_data = []
     if 'webcam_running' not in st.session_state:
         st.session_state.webcam_running = False
     if 'frame_count' not in st.session_state:
@@ -5089,6 +5134,8 @@ def show_pose_test_page():
         st.session_state.prev_resolution = "640x480"
     if 'prev_show_landmarks' not in st.session_state:
         st.session_state.prev_show_landmarks = True
+    if 'prev_enable_hands' not in st.session_state:
+        st.session_state.prev_enable_hands = False
 
     # 메인 컨텐츠
     col1, col2 = st.columns([2, 1])
@@ -5142,26 +5189,42 @@ def show_pose_test_page():
             help="랜드마크 좌표를 프레임별로 기록 (Bi-LSTM 학습용)"
         )
 
-        if len(st.session_state.pose_landmarks_data) > 0:
-            st.info(f"📊 기록된 프레임: {len(st.session_state.pose_landmarks_data)}개")
+        # MediaPipe Hands 활성화
+        enable_hands = st.checkbox(
+            "✋ MediaPipe Hands 활성화",
+            value=False,
+            help="손 랜드마크 감지 및 표시 (21개 랜드마크/손)"
+        )
 
-            # CSV 다운로드
-            csv_data = convert_landmarks_to_csv(st.session_state.pose_landmarks_data)
+        if len(st.session_state.pose_landmarks_data) > 0 or len(st.session_state.hand_landmarks_data) > 0:
+            pose_count = len(st.session_state.pose_landmarks_data)
+            hand_count = len(st.session_state.hand_landmarks_data)
+            st.info(f"📊 Pose: {pose_count}개 | Hands: {hand_count}개")
+
+            # CSV 다운로드 (Pose + Hands 통합)
+            csv_data = convert_landmarks_to_csv(
+                st.session_state.pose_landmarks_data,
+                st.session_state.hand_landmarks_data
+            )
             st.download_button(
-                "📥 CSV 다운로드",
+                "📥 CSV 다운로드 (Pose + Hands)",
                 data=csv_data,
-                file_name=f"pose_landmarks_{int(time.time())}.csv",
+                file_name=f"landmarks_{int(time.time())}.csv",
                 mime="text/csv",
                 use_container_width=True
             )
 
-            # JSON 다운로드
+            # JSON 다운로드 (Pose + Hands 통합)
             import json
-            json_data = json.dumps(st.session_state.pose_landmarks_data, indent=2)
+            combined_data = {
+                'pose_landmarks': st.session_state.pose_landmarks_data,
+                'hand_landmarks': st.session_state.hand_landmarks_data
+            }
+            json_data = json.dumps(combined_data, indent=2)
             st.download_button(
-                "📥 JSON 다운로드",
+                "📥 JSON 다운로드 (Pose + Hands)",
                 data=json_data,
-                file_name=f"pose_landmarks_{int(time.time())}.json",
+                file_name=f"landmarks_{int(time.time())}.json",
                 mime="application/json",
                 use_container_width=True
             )
@@ -5169,6 +5232,7 @@ def show_pose_test_page():
             # 데이터 초기화
             if st.button("🗑️ 데이터 초기화", use_container_width=True):
                 st.session_state.pose_landmarks_data = []
+                st.session_state.hand_landmarks_data = []
                 st.session_state.frame_count = 0
                 st.rerun()
 
@@ -5177,7 +5241,8 @@ def show_pose_test_page():
             st.session_state.prev_detection_conf != min_detection_confidence or
             st.session_state.prev_tracking_conf != min_tracking_confidence or
             st.session_state.prev_resolution != resolution_option or
-            st.session_state.prev_show_landmarks != show_landmarks
+            st.session_state.prev_show_landmarks != show_landmarks or
+            st.session_state.prev_enable_hands != enable_hands
         )
 
         if settings_changed and st.session_state.webcam_running:
@@ -5190,6 +5255,7 @@ def show_pose_test_page():
             st.session_state.prev_tracking_conf = min_tracking_confidence
             st.session_state.prev_resolution = resolution_option
             st.session_state.prev_show_landmarks = show_landmarks
+            st.session_state.prev_enable_hands = enable_hands
 
             st.session_state.webcam_running = True
             st.rerun()
@@ -5200,6 +5266,7 @@ def show_pose_test_page():
             st.session_state.prev_tracking_conf = min_tracking_confidence
             st.session_state.prev_resolution = resolution_option
             st.session_state.prev_show_landmarks = show_landmarks
+            st.session_state.prev_enable_hands = enable_hands
 
         st.markdown("---")
         st.markdown("### 📊 감지 정보")
@@ -5277,18 +5344,35 @@ def show_pose_test_page():
 
         if st.session_state.webcam_running:
             # MediaPipe Pose Landmarker 초기화 (새 API)
-            model_path = os.path.join(os.path.dirname(__file__), "models", "pose_landmarker_lite.task")
+            pose_model_path = os.path.join(os.path.dirname(__file__), "models", "pose_landmarker_lite.task")
 
             # PoseLandmarker 옵션 설정
-            base_options = python.BaseOptions(model_asset_path=model_path)
-            options = vision.PoseLandmarkerOptions(
-                base_options=base_options,
+            pose_base_options = python.BaseOptions(model_asset_path=pose_model_path)
+            pose_options = vision.PoseLandmarkerOptions(
+                base_options=pose_base_options,
                 running_mode=vision.RunningMode.VIDEO,
                 min_pose_detection_confidence=min_detection_confidence,
                 min_tracking_confidence=min_tracking_confidence
             )
 
-            landmarker = vision.PoseLandmarker.create_from_options(options)
+            pose_landmarker = vision.PoseLandmarker.create_from_options(pose_options)
+
+            # MediaPipe Hand Landmarker 초기화 (enable_hands가 True일 때만)
+            hand_landmarker = None
+            if enable_hands:
+                hand_model_path = os.path.join(os.path.dirname(__file__), "models", "hand_landmarker.task")
+
+                # HandLandmarker 옵션 설정
+                hand_base_options = python.BaseOptions(model_asset_path=hand_model_path)
+                hand_options = vision.HandLandmarkerOptions(
+                    base_options=hand_base_options,
+                    running_mode=vision.RunningMode.VIDEO,
+                    num_hands=2,  # 최대 2개의 손 감지
+                    min_hand_detection_confidence=min_detection_confidence,
+                    min_tracking_confidence=min_tracking_confidence
+                )
+
+                hand_landmarker = vision.HandLandmarker.create_from_options(hand_options)
 
             # 웹캠 초기화
             cap = cv2.VideoCapture(0)
@@ -5317,19 +5401,16 @@ def show_pose_test_page():
                     # 타임스탬프 증가 (밀리초 단위)
                     frame_timestamp_ms += int(1000 / 30)  # 30 FPS 가정
 
-                    # MediaPipe로 자세 감지
-                    detection_result = landmarker.detect_for_video(mp_image, frame_timestamp_ms)
+                    # MediaPipe Pose 감지
+                    pose_result = pose_landmarker.detect_for_video(mp_image, frame_timestamp_ms)
 
-                    # 랜드마크 그리기
-                    if show_landmarks and detection_result.pose_landmarks:
-                        # 첫 번째 사람의 랜드마크만 사용
-                        pose_landmarks = detection_result.pose_landmarks[0]
+                    # Pose 랜드마크 그리기
+                    if show_landmarks and pose_result.pose_landmarks:
+                        frame_rgb = draw_landmarks_on_image(frame_rgb, pose_result)
 
-                        # 랜드마크를 프레임에 그리기
-                        frame_rgb = draw_landmarks_on_image(frame_rgb, detection_result)
-
-                        # 데이터 저장 (옵션이 켜져 있는 경우)
+                        # Pose 데이터 저장 (옵션이 켜져 있는 경우)
                         if save_data:
+                            pose_landmarks = pose_result.pose_landmarks[0]
                             landmarks_dict = {
                                 'frame': st.session_state.frame_count,
                                 'timestamp': time.time(),
@@ -5346,7 +5427,47 @@ def show_pose_test_page():
                                 })
 
                             st.session_state.pose_landmarks_data.append(landmarks_dict)
-                            st.session_state.frame_count += 1
+
+                    # MediaPipe Hands 감지 (활성화된 경우)
+                    hand_result = None
+                    if enable_hands and hand_landmarker:
+                        hand_result = hand_landmarker.detect_for_video(mp_image, frame_timestamp_ms)
+
+                        # Hands 랜드마크 그리기
+                        if hand_result.hand_landmarks:
+                            frame_rgb = draw_hands_on_image(frame_rgb, hand_result)
+
+                            # Hands 데이터 저장 (옵션이 켜져 있는 경우)
+                            if save_data:
+                                hands_dict = {
+                                    'frame': st.session_state.frame_count,
+                                    'timestamp': time.time(),
+                                    'hands': []
+                                }
+
+                                # 감지된 각 손에 대해
+                                for hand_idx, hand_landmarks in enumerate(hand_result.hand_landmarks):
+                                    hand_data = {
+                                        'hand_index': hand_idx,
+                                        'handedness': hand_result.handedness[hand_idx][0].category_name if hand_result.handedness else 'Unknown',
+                                        'landmarks': []
+                                    }
+
+                                    for idx, landmark in enumerate(hand_landmarks):
+                                        hand_data['landmarks'].append({
+                                            'id': idx,
+                                            'x': landmark.x,
+                                            'y': landmark.y,
+                                            'z': landmark.z
+                                        })
+
+                                    hands_dict['hands'].append(hand_data)
+
+                                st.session_state.hand_landmarks_data.append(hands_dict)
+
+                    # 프레임 카운트 증가 (데이터 저장 시)
+                    if save_data and (pose_result.pose_landmarks or (hand_result and hand_result.hand_landmarks)):
+                        st.session_state.frame_count += 1
 
                     # FPS 계산
                     current_time = time.time()
@@ -5358,12 +5479,24 @@ def show_pose_test_page():
                                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
 
                     # 감지 상태 표시
-                    if detection_result.pose_landmarks:
-                        cv2.putText(frame_rgb, 'Pose Detected', (10, 70),
-                                   cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                    y_offset = 70
+                    if pose_result.pose_landmarks:
+                        cv2.putText(frame_rgb, 'Pose: OK', (10, y_offset),
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
                     else:
-                        cv2.putText(frame_rgb, 'No Pose Detected', (10, 70),
-                                   cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                        cv2.putText(frame_rgb, 'Pose: --', (10, y_offset),
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, (128, 128, 128), 2)
+
+                    # Hands 감지 상태 표시
+                    if enable_hands:
+                        y_offset += 35
+                        if hand_result and hand_result.hand_landmarks:
+                            num_hands = len(hand_result.hand_landmarks)
+                            cv2.putText(frame_rgb, f'Hands: {num_hands}', (10, y_offset),
+                                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 255), 2)
+                        else:
+                            cv2.putText(frame_rgb, 'Hands: --', (10, y_offset),
+                                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (128, 128, 128), 2)
 
                     # Streamlit에 표시
                     video_placeholder.image(frame_rgb, channels="RGB", use_container_width=True)
@@ -5378,7 +5511,9 @@ def show_pose_test_page():
                 st.error(traceback.format_exc())
             finally:
                 cap.release()
-                landmarker.close()
+                pose_landmarker.close()
+                if hand_landmarker:
+                    hand_landmarker.close()
                 st.session_state.webcam_running = False
         else:
             video_placeholder.info("▶️ '웹캠 시작' 버튼을 눌러 실시간 자세 감지를 시작하세요")
@@ -5394,30 +5529,81 @@ def show_pose_test_page():
         st.session_state.current_step = 'landing'
         st.rerun()
 
-def convert_landmarks_to_csv(landmarks_data):
-    """랜드마크 데이터를 CSV 형식으로 변환"""
-    if not landmarks_data:
+def convert_landmarks_to_csv(pose_landmarks_data, hand_landmarks_data):
+    """Pose 및 Hands 랜드마크 데이터를 CSV 형식으로 변환"""
+    if not pose_landmarks_data and not hand_landmarks_data:
         return ""
 
     # CSV 헤더 생성
     headers = ['frame', 'timestamp']
-    for i in range(33):  # MediaPipe Pose는 33개 랜드마크
-        headers.extend([f'landmark_{i}_x', f'landmark_{i}_y', f'landmark_{i}_z', f'landmark_{i}_visibility'])
+
+    # Pose 랜드마크 헤더 (33개)
+    for i in range(33):
+        headers.extend([f'pose_{i}_x', f'pose_{i}_y', f'pose_{i}_z', f'pose_{i}_visibility'])
+
+    # Hands 랜드마크 헤더 (최대 2개 손, 각 21개 랜드마크)
+    for hand_idx in range(2):
+        for i in range(21):
+            headers.extend([
+                f'hand{hand_idx}_lm{i}_x',
+                f'hand{hand_idx}_lm{i}_y',
+                f'hand{hand_idx}_lm{i}_z'
+            ])
+        headers.append(f'hand{hand_idx}_handedness')  # Left or Right
 
     csv_data = ','.join(headers) + '\n'
 
-    # 각 프레임 데이터를 CSV 행으로 변환
-    for frame_data in landmarks_data:
-        row = [str(frame_data['frame']), str(frame_data['timestamp'])]
+    # 프레임 데이터를 매칭하여 병합
+    max_frames = max(
+        len(pose_landmarks_data) if pose_landmarks_data else 0,
+        len(hand_landmarks_data) if hand_landmarks_data else 0
+    )
 
-        # 랜드마크가 33개가 아닐 경우를 대비한 처리
-        landmarks = frame_data.get('landmarks', [])
-        for i in range(33):
-            if i < len(landmarks):
-                lm = landmarks[i]
-                row.extend([str(lm['x']), str(lm['y']), str(lm['z']), str(lm['visibility'])])
+    for frame_idx in range(max_frames):
+        row = []
+
+        # Pose 데이터 가져오기
+        if frame_idx < len(pose_landmarks_data):
+            pose_frame = pose_landmarks_data[frame_idx]
+            row.extend([str(pose_frame['frame']), str(pose_frame['timestamp'])])
+
+            # Pose 랜드마크
+            landmarks = pose_frame.get('landmarks', [])
+            for i in range(33):
+                if i < len(landmarks):
+                    lm = landmarks[i]
+                    row.extend([str(lm['x']), str(lm['y']), str(lm['z']), str(lm['visibility'])])
+                else:
+                    row.extend(['', '', '', ''])
+        else:
+            row.extend(['', ''])  # frame, timestamp
+            for i in range(33):
+                row.extend(['', '', '', ''])
+
+        # Hands 데이터 가져오기
+        hands_dict = {}
+        if frame_idx < len(hand_landmarks_data):
+            hand_frame = hand_landmarks_data[frame_idx]
+            for hand_data in hand_frame.get('hands', []):
+                hand_idx = hand_data.get('hand_index', 0)
+                hands_dict[hand_idx] = hand_data
+
+        # 최대 2개 손에 대한 데이터
+        for hand_idx in range(2):
+            if hand_idx in hands_dict:
+                hand_data = hands_dict[hand_idx]
+                landmarks = hand_data.get('landmarks', [])
+                for i in range(21):
+                    if i < len(landmarks):
+                        lm = landmarks[i]
+                        row.extend([str(lm['x']), str(lm['y']), str(lm['z'])])
+                    else:
+                        row.extend(['', '', ''])
+                row.append(hand_data.get('handedness', ''))
             else:
-                row.extend(['0', '0', '0', '0'])
+                for i in range(21):
+                    row.extend(['', '', ''])
+                row.append('')
 
         csv_data += ','.join(row) + '\n'
 
