@@ -1,8 +1,17 @@
-streamlit
-st-gsheets-connection
-pandas
-opencv-python-headless
-mediapipe
+# 춤마루 MVP - 실시간 자세 감지 애플리케이션
+# 웹 프레임워크
+streamlit>=1.28.0
 
-Pillow
+# 데이터 처리
+pandas>=2.0.0
+numpy>=1.24.0
 
+# 컴퓨터 비전 및 MediaPipe
+opencv-python>=4.8.0
+mediapipe>=0.10.0
+
+# 이미지 처리
+Pillow>=10.0.0
+
+# 구글 시트 연동 (기존 기능용)
+st-gsheets-connection>=0.0.3

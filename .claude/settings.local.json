@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(streamlit run:*)",
+      "Bash(pip install:*)",
+      "Bash(python:*)",
+      "Bash(pip show:*)",
+      "Bash(pip uninstall:*)",
+      "Bash(pip search:*)",
+      "Bash(curl:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(timeout /t 5 /nobreak)",
+      "Bash(dir \"C:\\\\Users\\\\dlgus\\\\Documents\\\\dev\\\\choomaru\\\\choomaru_mvp\\\\models\")"
+    ]
+  }
+}
