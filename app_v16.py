@@ -2039,6 +2039,283 @@ def init_mediapipe():
     # 기존 코드와의 호환성을 위해 landmarker를 두 번 반환
     return landmarker, landmarker
 
+# ==================== 자세 비교 유틸리티 ====================
+
+def normalize_landmarks(landmarks):
+    """
+    좌표계 독립적 비교를 위한 랜드마크 정규화
+
+    방법:
+    1. 골반 중심점을 기준점으로 설정 (landmark 23, 24의 중점)
+    2. 어깨 너비로 스케일 정규화 (landmark 11, 12 거리)
+    3. 모든 좌표를 상대 좌표로 변환
+    """
+    if not landmarks or len(landmarks) < 33:
+        return None
+
+    # 골반 중심점 계산 (landmark 23, 24)
+    hip_left = landmarks[23]
+    hip_right = landmarks[24]
+    hip_center_x = (hip_left.x + hip_right.x) / 2
+    hip_center_y = (hip_left.y + hip_right.y) / 2
+    hip_center_z = (hip_left.z + hip_right.z) / 2
+
+    # 어깨 너비 계산 (landmark 11, 12)
+    shoulder_left = landmarks[11]
+    shoulder_right = landmarks[12]
+    shoulder_width = np.sqrt(
+        (shoulder_right.x - shoulder_left.x)**2 +
+        (shoulder_right.y - shoulder_left.y)**2 +
+        (shoulder_right.z - shoulder_left.z)**2
+    )
+
+    if shoulder_width == 0:
+        shoulder_width = 1.0  # 0으로 나누기 방지
+
+    # 정규화된 랜드마크 생성
+    normalized = []
+    for lm in landmarks:
+        normalized.append({
+            'x': (lm.x - hip_center_x) / shoulder_width,
+            'y': (lm.y - hip_center_y) / shoulder_width,
+            'z': (lm.z - hip_center_z) / shoulder_width,
+            'visibility': lm.visibility if hasattr(lm, 'visibility') else 1.0
+        })
+
+    return normalized
+
+def calculate_angle(point1, point2, point3):
+    """
+    3개 점으로 이루는 각도 계산 (point2가 꼭짓점)
+    반환: 각도 (도 단위)
+    """
+    # 벡터 계산
+    v1 = np.array([point1['x'] - point2['x'],
+                   point1['y'] - point2['y'],
+                   point1['z'] - point2['z']])
+    v2 = np.array([point3['x'] - point2['x'],
+                   point3['y'] - point2['y'],
+                   point3['z'] - point2['z']])
+
+    # 벡터의 내적과 크기로 각도 계산
+    cos_angle = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2) + 1e-6)
+    cos_angle = np.clip(cos_angle, -1.0, 1.0)  # 부동소수점 오차 보정
+    angle = np.arccos(cos_angle)
+
+    return np.degrees(angle)
+
+def calculate_joint_angles(landmarks):
+    """
+    주요 관절 각도 계산 (visibility 0.3 이상만 포함)
+
+    반환: dict {
+        'left_elbow': 각도,
+        'right_elbow': 각도,
+        'left_knee': 각도,
+        'right_knee': 각도,
+        'left_shoulder': 각도,
+        'right_shoulder': 각도,
+        'left_hip': 각도,
+        'right_hip': 각도
+    }
+    """
+    if not landmarks:
+        return {}
+
+    angles = {}
+    MIN_VISIBILITY = 0.3  # 최소 visibility 임계값 (낮춤)
+
+    try:
+        # 왼쪽 팔꿈치 (어깨11 - 팔꿈치13 - 손목15)
+        if (landmarks[11]['visibility'] >= MIN_VISIBILITY and
+            landmarks[13]['visibility'] >= MIN_VISIBILITY and
+            landmarks[15]['visibility'] >= MIN_VISIBILITY):
+            angles['left_elbow'] = calculate_angle(landmarks[11], landmarks[13], landmarks[15])
+
+        # 오른쪽 팔꿈치 (어깨12 - 팔꿈치14 - 손목16)
+        if (landmarks[12]['visibility'] >= MIN_VISIBILITY and
+            landmarks[14]['visibility'] >= MIN_VISIBILITY and
+            landmarks[16]['visibility'] >= MIN_VISIBILITY):
+            angles['right_elbow'] = calculate_angle(landmarks[12], landmarks[14], landmarks[16])
+
+        # 왼쪽 무릎 (골반23 - 무릎25 - 발목27)
+        if (landmarks[23]['visibility'] >= MIN_VISIBILITY and
+            landmarks[25]['visibility'] >= MIN_VISIBILITY and
+            landmarks[27]['visibility'] >= MIN_VISIBILITY):
+            angles['left_knee'] = calculate_angle(landmarks[23], landmarks[25], landmarks[27])
+
+        # 오른쪽 무릎 (골반24 - 무릎26 - 발목28)
+        if (landmarks[24]['visibility'] >= MIN_VISIBILITY and
+            landmarks[26]['visibility'] >= MIN_VISIBILITY and
+            landmarks[28]['visibility'] >= MIN_VISIBILITY):
+            angles['right_knee'] = calculate_angle(landmarks[24], landmarks[26], landmarks[28])
+
+        # 왼쪽 어깨 (골반23 - 어깨11 - 팔꿈치13)
+        if (landmarks[23]['visibility'] >= MIN_VISIBILITY and
+            landmarks[11]['visibility'] >= MIN_VISIBILITY and
+            landmarks[13]['visibility'] >= MIN_VISIBILITY):
+            angles['left_shoulder'] = calculate_angle(landmarks[23], landmarks[11], landmarks[13])
+
+        # 오른쪽 어깨 (골반24 - 어깨12 - 팔꿈치14)
+        if (landmarks[24]['visibility'] >= MIN_VISIBILITY and
+            landmarks[12]['visibility'] >= MIN_VISIBILITY and
+            landmarks[14]['visibility'] >= MIN_VISIBILITY):
+            angles['right_shoulder'] = calculate_angle(landmarks[24], landmarks[12], landmarks[14])
+
+        # 왼쪽 고관절 (어깨11 - 골반23 - 무릎25)
+        if (landmarks[11]['visibility'] >= MIN_VISIBILITY and
+            landmarks[23]['visibility'] >= MIN_VISIBILITY and
+            landmarks[25]['visibility'] >= MIN_VISIBILITY):
+            angles['left_hip'] = calculate_angle(landmarks[11], landmarks[23], landmarks[25])
+
+        # 오른쪽 고관절 (어깨12 - 골반24 - 무릎26)
+        if (landmarks[12]['visibility'] >= MIN_VISIBILITY and
+            landmarks[24]['visibility'] >= MIN_VISIBILITY and
+            landmarks[26]['visibility'] >= MIN_VISIBILITY):
+            angles['right_hip'] = calculate_angle(landmarks[12], landmarks[24], landmarks[26])
+
+    except Exception as e:
+        # 디버그: 에러 정보 출력
+        import traceback
+        print(f"calculate_joint_angles 에러: {e}")
+        print(traceback.format_exc())
+
+    return angles
+
+def compare_poses(user_landmarks, expert_landmarks):
+    """
+    전문가와 사용자 자세 비교
+
+    반환: dict {
+        'overall_score': 0-100,
+        'joint_scores': {...},
+        'feedback': [...]
+    }
+    """
+    if not user_landmarks or not expert_landmarks:
+        return {
+            'overall_score': 0,
+            'joint_scores': {},
+            'feedback': ['자세를 인식할 수 없습니다'],
+            'joint_coverage_percent': 0
+        }
+
+    # 랜드마크 정규화
+    user_norm = normalize_landmarks(user_landmarks)
+    expert_norm = normalize_landmarks(expert_landmarks)
+
+    if not user_norm or not expert_norm:
+        return {
+            'overall_score': 0,
+            'joint_scores': {},
+            'feedback': ['랜드마크 정규화 실패'],
+            'joint_coverage_percent': 0
+        }
+
+    # 관절 각도 계산
+    user_angles = calculate_joint_angles(user_norm)
+    expert_angles = calculate_joint_angles(expert_norm)
+
+    # 보이는 관절만 비교 (최소 1개 이상)
+    joint_scores = {}
+    angle_diffs = {}
+
+    # 사용자와 전문가 양쪽에 모두 있는 관절만 비교
+    for joint_name in user_angles.keys():
+        if joint_name in expert_angles:
+            diff = abs(user_angles[joint_name] - expert_angles[joint_name])
+            angle_diffs[joint_name] = diff
+
+            # 점수 계산 (차이가 0도 = 100점, 30도 이상 = 0점)
+            score = max(0, 100 - (diff / 30.0) * 100)
+            joint_scores[joint_name] = score
+
+    # 비교 가능한 관절이 하나도 없는 경우
+    if not joint_scores:
+        return {
+            'overall_score': 1,
+            'joint_scores': {},
+            'angle_diffs': {},
+            'feedback': ['📸 자세를 조금 더 명확하게 취해주세요'],
+            'joint_coverage_percent': 0
+        }
+
+    # 전체 점수 계산 (비교된 관절들의 평균)
+    overall_score = np.mean(list(joint_scores.values()))
+
+    # 피드백 생성
+    feedback = generate_feedback(angle_diffs, user_angles, expert_angles)
+
+    # 관절 감지율 계산 (백분율)
+    num_compared = len(joint_scores)
+    total_joints = 8  # 전체 관절 수
+    joint_coverage_percent = int((num_compared / total_joints) * 100)
+
+    return {
+        'overall_score': overall_score,
+        'joint_scores': joint_scores,
+        'angle_diffs': angle_diffs,
+        'feedback': feedback,
+        'joint_coverage_percent': joint_coverage_percent
+    }
+
+def generate_feedback(angle_diffs, user_angles, expert_angles):
+    """
+    각도 차이를 기반으로 구체적인 피드백 생성
+    """
+    feedback = []
+
+    # 관절 이름 한글 매핑
+    joint_names_ko = {
+        'left_elbow': '왼쪽 팔꿈치',
+        'right_elbow': '오른쪽 팔꿈치',
+        'left_knee': '왼쪽 무릎',
+        'right_knee': '오른쪽 무릎',
+        'left_shoulder': '왼쪽 어깨',
+        'right_shoulder': '오른쪽 어깨',
+        'left_hip': '왼쪽 골반',
+        'right_hip': '오른쪽 골반'
+    }
+
+    # 차이가 큰 순서대로 정렬
+    sorted_diffs = sorted(angle_diffs.items(), key=lambda x: x[1], reverse=True)
+
+    # 상위 3개만 피드백
+    for joint_name, diff in sorted_diffs[:3]:
+        if diff < 10:  # 10도 미만은 양호
+            continue
+
+        korean_name = joint_names_ko.get(joint_name, joint_name)
+        user_angle = user_angles.get(joint_name, 0)
+        expert_angle = expert_angles.get(joint_name, 0)
+
+        # 방향 결정
+        if user_angle > expert_angle:
+            if '팔꿈치' in korean_name or '무릎' in korean_name:
+                direction = f"{int(diff)}도 더 구부리세요"
+            else:
+                direction = f"{int(diff)}도 더 내리세요"
+        else:
+            if '팔꿈치' in korean_name or '무릎' in korean_name:
+                direction = f"{int(diff)}도 더 펴세요"
+            else:
+                direction = f"{int(diff)}도 더 올리세요"
+
+        # 심각도 표시
+        if diff > 30:
+            severity = "🔴"
+        elif diff > 15:
+            severity = "🟡"
+        else:
+            severity = "🟢"
+
+        feedback.append(f"{severity} {korean_name}를 {direction}")
+
+    if not feedback:
+        feedback.append("🟢 완벽합니다!")
+
+    return feedback
+
 # 동작 분석 함수 (간단한 예시)
 def analyze_movement(pose_landmarks, action_name):
     """
@@ -2047,7 +2324,7 @@ def analyze_movement(pose_landmarks, action_name):
     """
     # 랜덤 성공/실패 (70% 성공률)
     success = random.random() > 0.3
-    
+
     if success:
         return {
             "success": True,
@@ -3221,15 +3498,15 @@ def show_action_select_page():
 def show_action_page():
     # 현재 언어에 맞는 기본 동작 가져오기
     basic_actions = get_basic_actions(st.session_state.language)
-    
+
     if st.session_state.current_action >= len(basic_actions):
         st.session_state.current_step = 'meme'
         st.rerun()
         return
-    
+
     action = basic_actions[st.session_state.current_action]
     progress = (st.session_state.current_action + 1) / len(basic_actions)
-    
+
     # 헤더
     col1, col2, col3 = st.columns([1, 4, 1])
     with col1:
@@ -3239,16 +3516,16 @@ def show_action_page():
             else:
                 st.session_state.current_step = 'action_select'
             st.rerun()
-    
+
     with col2:
         st.markdown(f"### {action['name']} ({st.session_state.current_action + 1}/12)")
         st.progress(progress, text=f"{t('progress')}: {int(progress*100)}%")
-    
+
     with col3:
         if st.button(t('btn_home')):
             st.session_state.current_step = 'landing'
             st.rerun()
-    
+
     # 동작 설명
     st.markdown(f"""
     <div class='action-card'>
@@ -3257,59 +3534,221 @@ def show_action_page():
         <small>💡 {action['historical_note']}</small>
     </div>
     """, unsafe_allow_html=True)
-    
-    # 영상과 웹캠
+
+    # 세션 상태 초기화 (웹캠 제어용)
+    if 'action_webcam_running' not in st.session_state:
+        st.session_state.action_webcam_running = False
+    if 'comparison_score' not in st.session_state:
+        st.session_state.comparison_score = 0
+    if 'comparison_feedback' not in st.session_state:
+        st.session_state.comparison_feedback = []
+    if 'joint_coverage_percent' not in st.session_state:
+        st.session_state.joint_coverage_percent = 0
+
+    # 영상 파일 경로
+    video_path = f"videos/{action['video_file']}"
+
+    # 웹캠 제어 버튼 (상단)
+    button_col1, button_col2, button_col3 = st.columns([1, 1, 4])
+    with button_col1:
+        if st.button("▶️ 웹캠 시작", key="action_start", use_container_width=True,
+                    disabled=st.session_state.action_webcam_running):
+            st.session_state.action_webcam_running = True
+            st.rerun()
+
+    with button_col2:
+        if st.button("⏹️ 웹캠 중지", key="action_stop", use_container_width=True,
+                    disabled=not st.session_state.action_webcam_running):
+            st.session_state.action_webcam_running = False
+            st.rerun()
+
+    # 2열 레이아웃: 전문가 | 사용자
     col1, col2 = st.columns(2)
-    
+
     with col1:
         st.markdown(f"#### {t('expert_demo')}")
-        # 영상 파일이 있다면 표시
-        video_path = f"videos/{action['video_file']}"
-        try:
-            st.video(video_path)
-        except:
-            st.info(f"{action['name']} 시범 영상 - 업로드 예정")
-            st.image("https://via.placeholder.com/320x240/f093fb/ffffff?text=시범+영상", 
-                    caption=f"{action['name']} 전문가 시연")
-    
+        expert_video_placeholder = st.empty()
+        # 전문가 시범 밑에 개선 포인트 표시
+        feedback_placeholder = st.empty()
+
     with col2:
         st.markdown(f"#### {t('your_movement')}")
-        
-        # 웹캠 입력
-        camera_input = st.camera_input(t('webcam_guide'))
-        
-        if camera_input is not None:
-            # 이미지 처리
-            image = Image.open(camera_input)
-            image_np = np.array(image)
-            
-            # MediaPipe로 동작 분석
-            pose, mp_pose = init_mediapipe()
-            
-            # RGB 변환
-            rgb_image = cv2.cvtColor(image_np, cv2.COLOR_BGR2RGB)
-            results = pose.process(rgb_image)
-            
-            if results.pose_landmarks:
-                # 동작 분석
-                analysis_result = analyze_movement(results.pose_landmarks, action['name'])
-                
-                if analysis_result['success']:
-                    st.success(f"✅ {analysis_result['message']}")
-                    st.balloons()
-                    
-                    # 완료된 동작에 추가
-                    if st.session_state.current_action not in st.session_state.completed_actions:
-                        st.session_state.completed_actions.append(st.session_state.current_action)
-                    
-                    # 다음 동작으로
-                    time.sleep(2)
-                    st.session_state.current_action += 1
-                    st.rerun()
+        user_video_placeholder = st.empty()
+
+    if st.session_state.action_webcam_running:
+        # MediaPipe Pose Landmarker 초기화 (두 개 모두 VIDEO 모드)
+        pose_model_path = os.path.join(os.path.dirname(__file__), "models", "pose_landmarker_lite.task")
+
+        # 전문가 영상용 VIDEO 모드
+        expert_base_options = python.BaseOptions(model_asset_path=pose_model_path)
+        expert_options = vision.PoseLandmarkerOptions(
+            base_options=expert_base_options,
+            running_mode=vision.RunningMode.VIDEO,
+            min_pose_detection_confidence=0.5,
+            min_tracking_confidence=0.5
+        )
+        expert_pose_landmarker = vision.PoseLandmarker.create_from_options(expert_options)
+
+        # 사용자 웹캠용 VIDEO 모드
+        user_base_options = python.BaseOptions(model_asset_path=pose_model_path)
+        user_options = vision.PoseLandmarkerOptions(
+            base_options=user_base_options,
+            running_mode=vision.RunningMode.VIDEO,
+            min_pose_detection_confidence=0.5,
+            min_tracking_confidence=0.5
+        )
+        user_pose_landmarker = vision.PoseLandmarker.create_from_options(user_options)
+
+        # 전문가 영상 캡처 초기화
+        expert_cap = None
+        expert_landmarks = None
+        if os.path.exists(video_path):
+            expert_cap = cv2.VideoCapture(video_path)
+            expert_fps = expert_cap.get(cv2.CAP_PROP_FPS) or 30
+        else:
+            expert_video_placeholder.info(f"{action['name']} 시범 영상 - 업로드 예정")
+
+        # 웹캠 초기화
+        cap = cv2.VideoCapture(0)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+
+        # 타임스탬프 초기화
+        expert_timestamp_ms = 0
+        user_timestamp_ms = 0
+        user_frame_count = 0
+
+        # 비교 간격 (1초 = 30프레임, 30fps 기준)
+        comparison_interval = 30
+        last_comparison_frame = -30  # 첫 프레임부터 즉시 비교 시작
+
+        # 랜드마크 초기화
+        expert_landmarks = None
+        user_landmarks = None
+
+        try:
+            while st.session_state.action_webcam_running:
+                # 1. 전문가 영상 프레임 읽기
+                if expert_cap and expert_cap.isOpened():
+                    ret_expert, expert_frame = expert_cap.read()
+
+                    # 영상 끝나면 처음부터 다시 재생 (루프) - 타임스탬프는 계속 증가
+                    if not ret_expert:
+                        expert_cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        # 타임스탬프는 리셋하지 않고 계속 증가 (단조 증가 보장)
+                        ret_expert, expert_frame = expert_cap.read()
+
+                    if ret_expert:
+                        expert_frame_rgb = cv2.cvtColor(expert_frame, cv2.COLOR_BGR2RGB)
+
+                        # MediaPipe Image로 변환
+                        expert_mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=expert_frame_rgb)
+
+                        # Pose 감지
+                        expert_result = expert_pose_landmarker.detect_for_video(expert_mp_image, expert_timestamp_ms)
+
+                        # 랜드마크 그리기
+                        if expert_result.pose_landmarks:
+                            expert_frame_rgb = draw_landmarks_on_image(expert_frame_rgb, expert_result)
+                            expert_landmarks = expert_result.pose_landmarks[0]
+
+                        # 전문가 영상 표시
+                        expert_video_placeholder.image(expert_frame_rgb, channels="RGB", use_container_width=True)
+
+                        # 타임스탬프 증가 (절대 감소하지 않음)
+                        expert_timestamp_ms += int(1000 / expert_fps)
+
+                # 2. 사용자 웹캠 프레임 읽기
+                ret_user, user_frame = cap.read()
+
+                if not ret_user:
+                    st.error("❌ 웹캠에서 영상을 읽을 수 없습니다.")
+                    break
+
+                # BGR을 RGB로 변환
+                user_frame_rgb = cv2.cvtColor(user_frame, cv2.COLOR_BGR2RGB)
+
+                # 좌우 반전 (거울 효과)
+                user_frame_rgb = cv2.flip(user_frame_rgb, 1)
+
+                # MediaPipe Image로 변환
+                user_mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=user_frame_rgb)
+
+                # Pose 감지 (매 프레임)
+                user_result = user_pose_landmarker.detect_for_video(user_mp_image, user_timestamp_ms)
+
+                # 랜드마크 그리기
+                if user_result.pose_landmarks:
+                    user_frame_rgb = draw_landmarks_on_image(user_frame_rgb, user_result)
+                    user_landmarks = user_result.pose_landmarks[0]
+
+                    # 자세 비교 (1초마다 한번)
+                    if user_frame_count - last_comparison_frame >= comparison_interval:
+                        if expert_landmarks:
+                            comparison_result = compare_poses(user_landmarks, expert_landmarks)
+                            st.session_state.comparison_score = comparison_result['overall_score']
+                            st.session_state.comparison_feedback = comparison_result['feedback']
+                            st.session_state.joint_coverage_percent = comparison_result['joint_coverage_percent']
+                            last_comparison_frame = user_frame_count
                 else:
-                    st.warning(f"⚠️ {analysis_result['message']}")
-            else:
-                st.info("자세를 인식할 수 없습니다. 전신이 보이도록 해주세요.")
+                    # 자세 미감지
+                    cv2.putText(user_frame_rgb, 'Pose: Not Detected', (10, 30),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
+
+                # 사용자 웹캠 표시
+                user_video_placeholder.image(user_frame_rgb, channels="RGB", use_container_width=True)
+
+                # 피드백 표시 (전문가 시범 밑에)
+                if st.session_state.comparison_score > 0:
+                    score_color = "🟢" if st.session_state.comparison_score >= 80 else "🟡" if st.session_state.comparison_score >= 60 else "🔴"
+
+                    # 점수와 감지율을 같은 줄에 표시
+                    coverage_percent = st.session_state.get('joint_coverage_percent', 100)
+                    feedback_text = f"**{score_color} {st.session_state.comparison_score:.0f}점, 카메라에 감지된 관절: {coverage_percent}%**\n\n"
+
+                    if st.session_state.comparison_feedback:
+                        # 각 피드백 항목 사이에 줄바꿈 추가
+                        for fb in st.session_state.comparison_feedback:
+                            feedback_text += f"{fb}\n\n"
+                    else:
+                        feedback_text += "🟢 완벽합니다!"
+
+                    feedback_placeholder.markdown(feedback_text)
+                elif user_result.pose_landmarks and expert_landmarks:
+                    feedback_placeholder.info("분석 중...")
+                else:
+                    feedback_placeholder.info("전신이 보이도록 자세를 취해주세요")
+
+                # 타임스탬프 증가
+                user_timestamp_ms += int(1000 / 30)
+                user_frame_count += 1
+
+                # CPU 사용량 감소
+                time.sleep(0.01)
+
+        except Exception as e:
+            st.error(f"❌ 오류 발생: {str(e)}")
+        finally:
+            cap.release()
+            if expert_cap:
+                expert_cap.release()
+            st.session_state.action_webcam_running = False
+    else:
+        # 웹캠 중지 상태일 때
+        if os.path.exists(video_path):
+            expert_video_placeholder.video(video_path)
+        else:
+            expert_video_placeholder.info(f"{action['name']} 시범 영상 - 업로드 예정")
+
+        user_video_placeholder.info(t('webcam_guide'))
+        feedback_placeholder.info("웹캠을 시작하고 자세를 취하면 즉시 피드백이 표시됩니다")
+
+    # 완료 조건 체크 (점수 80점 이상)
+    if st.session_state.comparison_score >= 80:
+        if st.session_state.current_action not in st.session_state.completed_actions:
+            st.session_state.completed_actions.append(st.session_state.current_action)
+            st.success(f"✅ {action['name']} 동작을 완료했습니다!")
+            st.balloons()
     
     # 세부 영상 표시
     if 'detail_videos' in action:
@@ -3404,6 +3843,10 @@ def show_expanded_action_page():
             
             # RGB 변환
             rgb_image = cv2.cvtColor(image_np, cv2.COLOR_BGR2RGB)
+
+            # 좌우 반전 (거울 효과)
+            rgb_image = cv2.flip(rgb_image, 1)
+
             results = pose.process(rgb_image)
             
             if results.pose_landmarks:
@@ -3503,6 +3946,10 @@ def show_creative_action_page():
             
             # RGB 변환
             rgb_image = cv2.cvtColor(image_np, cv2.COLOR_BGR2RGB)
+
+            # 좌우 반전 (거울 효과)
+            rgb_image = cv2.flip(rgb_image, 1)
+
             results = pose.process(rgb_image)
             
             if results.pose_landmarks:
@@ -5394,6 +5841,9 @@ def show_pose_test_page():
 
                     # BGR을 RGB로 변환
                     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+                    # 좌우 반전 (거울 효과)
+                    frame_rgb = cv2.flip(frame_rgb, 1)
 
                     # NumPy 배열을 MediaPipe Image로 변환
                     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
