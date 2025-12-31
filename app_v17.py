@@ -26,6 +26,10 @@ import os
 from datetime import datetime
 from pathlib import Path
 import pandas as pd
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
+import av
+import threading
+from typing import Union
 
 # ==================== 페이지 설정 ====================
 st.set_page_config(page_title="춤마루 (Choomaru)", page_icon="💃", layout="wide")
@@ -3249,6 +3253,22 @@ def show_landing_page():
                 st.session_state.current_step = 'expert_ranking'
                 st.rerun()
 
+        # 모바일 테스트 버튼 추가
+        st.markdown("---")
+        st.markdown("""
+        <div style='text-align: center; padding: 1.5rem; background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+                    border-radius: 20px; color: white; margin: 2rem 0;'>
+            <h3>📱 모바일에서 춤마루 체험하기</h3>
+            <p style='font-size: 1rem; margin: 1rem 0;'>
+                스마트폰 카메라로 실시간 자세 인식을 테스트해보세요
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        if st.button("📱 모바일 동작 테스트", type="primary", use_container_width=True):
+            st.session_state.current_step = 'mobile_test'
+            st.rerun()
+
 def show_test_page():
     # 현재 언어에 맞는 질문 가져오기
     questions = get_questions(st.session_state.language)
@@ -3496,6 +3516,101 @@ def show_action_select_page():
         st.rerun()
 
 def show_action_page():
+    # 모바일 감지 JavaScript
+    st.markdown("""
+    <script>
+    const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    if (isMobileDevice) {
+        window.isMobileDevice = true;
+    }
+    </script>
+    """, unsafe_allow_html=True)
+
+    # 모바일 사용자에게 안내 (현재는 PC에서만 실시간 비교 가능)
+    st.warning("""
+    ⚠️ **모바일 사용자 안내**
+
+    현재 이 페이지는 PC 웹캠을 사용하여 실시간 자세 비교를 제공합니다.
+
+    **모바일에서 자세 분석을 원하신다면:**
+    - 홈 화면으로 돌아가서
+    - "📱 모바일 동작 테스트" 버튼을 클릭하세요
+    - 스마트폰 카메라로 자세를 분석할 수 있습니다
+    """)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🏠 홈으로 돌아가기"):
+            st.session_state.current_step = 'landing'
+            st.rerun()
+    with col2:
+        if st.button("📱 모바일 테스트로 이동"):
+            st.session_state.current_step = 'mobile_test'
+            st.rerun()
+
+    st.markdown("---")
+
+    # 모바일 반응형 스타일 추가
+    st.markdown("""
+    <style>
+    /* 모바일 기본 스타일 */
+    @media (max-width: 768px) {
+        .main .block-container {
+            padding: 0.5rem;
+        }
+
+        .stButton button {
+            font-size: 0.9rem;
+            padding: 0.4rem 0.8rem;
+        }
+    }
+
+    /* 모바일 가로모드 레이아웃 */
+    @media (orientation: landscape) and (max-width: 900px) {
+        .video-row {
+            display: flex;
+            flex-direction: row;
+            gap: 0.5rem;
+        }
+
+        .video-column {
+            flex: 1;
+            max-width: 50%;
+        }
+
+        .stMarkdown h4 {
+            font-size: 1rem;
+        }
+
+        /* 버튼을 컴팩트하게 */
+        .action-controls {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .action-controls .stButton {
+            flex: 1;
+        }
+    }
+
+    /* 모바일 세로모드 */
+    @media (orientation: portrait) and (max-width: 768px) {
+        .video-row {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .video-column {
+            width: 100%;
+        }
+
+        .action-card {
+            padding: 0.5rem;
+        }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
     # 현재 언어에 맞는 기본 동작 가져오기
     basic_actions = get_basic_actions(st.session_state.language)
 
@@ -3812,6 +3927,44 @@ def show_action_page():
         st.success(f"{badge['emoji']} {badge['name']} {t('badge_earned')} {badge['message']}")
 
 def show_expanded_action_page():
+    # 모바일 반응형 스타일 추가
+    st.markdown("""
+    <style>
+    /* 모바일 기본 스타일 */
+    @media (max-width: 768px) {
+        .main .block-container {
+            padding: 0.5rem;
+        }
+    }
+
+    /* 모바일 가로모드 레이아웃 */
+    @media (orientation: landscape) and (max-width: 900px) {
+        .video-row {
+            display: flex;
+            flex-direction: row;
+            gap: 0.5rem;
+        }
+
+        .video-column {
+            flex: 1;
+            max-width: 50%;
+        }
+    }
+
+    /* 모바일 세로모드 */
+    @media (orientation: portrait) and (max-width: 768px) {
+        .video-row {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .video-column {
+            width: 100%;
+        }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
     # 현재 언어에 맞는 확장 동작 가져오기
     expanded_actions = get_expanded_actions(st.session_state.language)
     
@@ -3915,6 +4068,44 @@ def show_expanded_action_page():
         st.rerun()
 
 def show_creative_action_page():
+    # 모바일 반응형 스타일 추가
+    st.markdown("""
+    <style>
+    /* 모바일 기본 스타일 */
+    @media (max-width: 768px) {
+        .main .block-container {
+            padding: 0.5rem;
+        }
+    }
+
+    /* 모바일 가로모드 레이아웃 */
+    @media (orientation: landscape) and (max-width: 900px) {
+        .video-row {
+            display: flex;
+            flex-direction: row;
+            gap: 0.5rem;
+        }
+
+        .video-column {
+            flex: 1;
+            max-width: 50%;
+        }
+    }
+
+    /* 모바일 세로모드 */
+    @media (orientation: portrait) and (max-width: 768px) {
+        .video-row {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .video-column {
+            width: 100%;
+        }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
     # 현재 언어에 맞는 창작 동작 가져오기
     creative_actions = get_creative_actions(st.session_state.language)
     
@@ -5593,430 +5784,186 @@ def draw_hands_on_image(rgb_image, detection_result):
     return annotated_image
 
 def show_pose_test_page():
-    """MediaPipe를 활용한 실시간 자세 감지 페이지"""
+    """MediaPipe를 활용한 실시간 자세 감지 페이지 (WebRTC 기반)"""
     st.markdown("""
     <div style='text-align: center; padding: 1rem 0;'>
-        <h2>🎯 실시간 자세 감지 테스트</h2>
-        <p style='color: #666;'>MediaPipe Pose를 활용하여 웹캠에서 실시간으로 자세 랜드마크를 감지합니다</p>
+        <h2>🎯 실시간 자세 감지</h2>
+        <p style='color: #666;'>MediaPipe를 활용하여 웹캠에서 실시간으로 자세와 손 랜드마크를 감지합니다.</p>
     </div>
     """, unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns([1, 4, 1])
+    with col1:
+        if st.button("🏠 홈으로 돌아가기", key="pose_home"):
+            st.session_state.current_step = 'landing'
+            st.rerun()
+
+    st.markdown("---")
 
     # 세션 상태 초기화
     if 'pose_landmarks_data' not in st.session_state:
         st.session_state.pose_landmarks_data = []
     if 'hand_landmarks_data' not in st.session_state:
         st.session_state.hand_landmarks_data = []
-    if 'webcam_running' not in st.session_state:
-        st.session_state.webcam_running = False
-    if 'frame_count' not in st.session_state:
-        st.session_state.frame_count = 0
-
-    # 설정값 초기화 (설정 변경 감지용)
-    if 'prev_detection_conf' not in st.session_state:
-        st.session_state.prev_detection_conf = 0.5
-    if 'prev_tracking_conf' not in st.session_state:
-        st.session_state.prev_tracking_conf = 0.5
-    if 'prev_resolution' not in st.session_state:
-        st.session_state.prev_resolution = "640x480"
-    if 'prev_show_landmarks' not in st.session_state:
-        st.session_state.prev_show_landmarks = True
-    if 'prev_enable_hands' not in st.session_state:
-        st.session_state.prev_enable_hands = False
 
     # 메인 컨텐츠
     col1, col2 = st.columns([2, 1])
 
-    # col2(설정)를 먼저 렌더링하여 변수들을 정의
     with col2:
         st.markdown("### ⚙️ 설정")
-
-        # 설정 컨트롤
-        st.markdown("#### 감지 설정")
-        min_detection_confidence = st.slider(
-            "감지 신뢰도",
-            min_value=0.0,
-            max_value=1.0,
-            value=0.5,
-            step=0.1,
-            help="자세를 처음 감지할 때의 최소 신뢰도"
-        )
-
-        min_tracking_confidence = st.slider(
-            "추적 신뢰도",
-            min_value=0.0,
-            max_value=1.0,
-            value=0.5,
-            step=0.1,
-            help="이미 감지된 자세를 추적할 때의 최소 신뢰도"
-        )
-
-        st.markdown("#### 화면 설정")
-        resolution_option = st.selectbox(
-            "해상도",
-            ["640x480", "800x600", "1280x720"],
-            index=0,
-            help="웹캠 해상도 설정"
-        )
-
-        # 해상도 파싱
-        width, height = map(int, resolution_option.split('x'))
-
-        show_landmarks = st.checkbox(
-            "랜드마크 표시",
-            value=True,
-            help="웹캠 화면에 자세 랜드마크를 표시"
-        )
+        min_detection_confidence = st.slider("감지 신뢰도", 0.0, 1.0, 0.5, 0.1)
+        min_tracking_confidence = st.slider("추적 신뢰도", 0.0, 1.0, 0.5, 0.1)
+        show_landmarks = st.checkbox("랜드마크 표시", value=True)
+        enable_hands = st.checkbox("✋ 손 감지 활성화", value=True)
 
         st.markdown("---")
         st.markdown("#### 데이터 저장")
-        save_data = st.checkbox(
-            "랜드마크 데이터 기록",
-            value=False,
-            help="랜드마크 좌표를 프레임별로 기록 (Bi-LSTM 학습용)"
-        )
+        save_data = st.checkbox("랜드마크 데이터 기록")
 
-        # MediaPipe Hands 활성화
-        enable_hands = st.checkbox(
-            "✋ MediaPipe Hands 활성화",
-            value=False,
-            help="손 랜드마크 감지 및 표시 (21개 랜드마크/손)"
-        )
+        if save_data:
+            st.info("데이터 기록이 활성화되었습니다. 스트리밍 중 데이터가 수집됩니다.")
 
-        if len(st.session_state.pose_landmarks_data) > 0 or len(st.session_state.hand_landmarks_data) > 0:
-            pose_count = len(st.session_state.pose_landmarks_data)
-            hand_count = len(st.session_state.hand_landmarks_data)
+        pose_count = len(st.session_state.pose_landmarks_data)
+        hand_count = len(st.session_state.hand_landmarks_data)
+
+        if pose_count > 0 or hand_count > 0:
             st.info(f"📊 Pose: {pose_count}개 | Hands: {hand_count}개")
-
-            # CSV 다운로드 (Pose + Hands 통합)
-            csv_data = convert_landmarks_to_csv(
-                st.session_state.pose_landmarks_data,
-                st.session_state.hand_landmarks_data
-            )
-            st.download_button(
-                "📥 CSV 다운로드 (Pose + Hands)",
-                data=csv_data,
-                file_name=f"landmarks_{int(time.time())}.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
-
-            # JSON 다운로드 (Pose + Hands 통합)
-            import json
-            combined_data = {
-                'pose_landmarks': st.session_state.pose_landmarks_data,
-                'hand_landmarks': st.session_state.hand_landmarks_data
-            }
+            csv_data = convert_landmarks_to_csv(st.session_state.pose_landmarks_data, st.session_state.hand_landmarks_data)
+            st.download_button("📥 CSV 다운로드", csv_data, f"landmarks_{int(time.time())}.csv", "text/csv", use_container_width=True)
+            
+            combined_data = {'pose_landmarks': st.session_state.pose_landmarks_data, 'hand_landmarks': st.session_state.hand_landmarks_data}
             json_data = json.dumps(combined_data, indent=2)
-            st.download_button(
-                "📥 JSON 다운로드 (Pose + Hands)",
-                data=json_data,
-                file_name=f"landmarks_{int(time.time())}.json",
-                mime="application/json",
-                use_container_width=True
-            )
+            st.download_button("📥 JSON 다운로드", json_data, f"landmarks_{int(time.time())}.json", "application/json", use_container_width=True)
 
-            # 데이터 초기화
             if st.button("🗑️ 데이터 초기화", use_container_width=True):
                 st.session_state.pose_landmarks_data = []
                 st.session_state.hand_landmarks_data = []
-                st.session_state.frame_count = 0
                 st.rerun()
-
-        # 설정 변경 감지 및 자동 재시작
-        settings_changed = (
-            st.session_state.prev_detection_conf != min_detection_confidence or
-            st.session_state.prev_tracking_conf != min_tracking_confidence or
-            st.session_state.prev_resolution != resolution_option or
-            st.session_state.prev_show_landmarks != show_landmarks or
-            st.session_state.prev_enable_hands != enable_hands
-        )
-
-        if settings_changed and st.session_state.webcam_running:
-            st.warning("⚠️ 설정이 변경되었습니다. 웹캠을 재시작합니다...")
-            st.session_state.webcam_running = False
-            time.sleep(0.5)  # 리소스 정리 대기
-
-            # 변경된 설정 저장
-            st.session_state.prev_detection_conf = min_detection_confidence
-            st.session_state.prev_tracking_conf = min_tracking_confidence
-            st.session_state.prev_resolution = resolution_option
-            st.session_state.prev_show_landmarks = show_landmarks
-            st.session_state.prev_enable_hands = enable_hands
-
-            st.session_state.webcam_running = True
-            st.rerun()
-
-        # 설정값 업데이트 (변경 없을 때)
-        if not settings_changed:
-            st.session_state.prev_detection_conf = min_detection_confidence
-            st.session_state.prev_tracking_conf = min_tracking_confidence
-            st.session_state.prev_resolution = resolution_option
-            st.session_state.prev_show_landmarks = show_landmarks
-            st.session_state.prev_enable_hands = enable_hands
-
-        st.markdown("---")
-        st.markdown("### 📊 감지 정보")
-
-        if st.session_state.webcam_running:
-            st.success("✅ 웹캠 실행 중")
-        else:
-            st.info("⏸️ 웹캠 대기 중")
-
-        # MediaPipe Pose 랜드마크 정보
-        with st.expander("🎯 MediaPipe Pose 랜드마크 (33개)", expanded=False):
-            st.markdown("""
-            **얼굴/머리 (8개)**
-            - 0: 코, 1-4: 눈, 5-8: 입
-
-            **상체 (14개)**
-            - 11-12: 어깨
-            - 13-14: 팔꿈치
-            - 15-16: 손목
-            - 17-22: 손 (엄지, 검지, 새끼손가락)
-
-            **하체 (11개)**
-            - 23-24: 엉덩이
-            - 25-26: 무릎
-            - 27-28: 발목
-            - 29-32: 발 (뒤꿈치, 발끝)
-            """)
-
-        # 최근 감지된 랜드마크 좌표 표시
-        if len(st.session_state.pose_landmarks_data) > 0:
-            with st.expander("📍 최근 랜드마크 좌표", expanded=False):
-                latest_data = st.session_state.pose_landmarks_data[-1]
-                st.json(latest_data)
-
-        # 사용 가이드
-        with st.expander("📖 사용 가이드", expanded=True):
+        
+        with st.expander("📖 사용 가이드", expanded=False):
             st.markdown("""
             **사용 방법:**
-            1. 우측 설정 패널에서 감지 신뢰도와 해상도를 조절하세요
-            2. '웹캠 시작' 버튼을 클릭하세요
-            3. 카메라 앞에서 몸 전체가 나오도록 서세요
-            4. 랜드마크가 자동으로 감지되어 표시됩니다
-            5. 설정을 변경하면 웹캠이 자동으로 재시작됩니다
-
-            **데이터 저장:**
-            - 우측 패널에서 '랜드마크 데이터 기록'을 활성화
-            - CSV 또는 JSON 형식으로 다운로드 가능
-            - Bi-LSTM 학습용 데이터로 활용 가능
-
+            1. 'START' 버튼을 클릭하여 카메라를 시작하세요.
+            2. 카메라 권한을 허용해주세요.
+            3. 카메라 앞에서 몸 전체가 나오도록 서세요.
+            4. 랜드마크가 자동으로 감지되어 표시됩니다.
             **팁:**
-            - 조명이 밝은 곳에서 사용하세요
-            - 배경이 단순할수록 감지 정확도가 높아집니다
-            - 카메라와 2-3m 거리를 유지하세요
+            - 조명이 밝은 곳에서 사용하세요.
+            - 배경이 단순할수록 감지 정확도가 높아집니다.
+            - 카메라와 2-3m 거리를 유지하세요.
             """)
 
-    # col1(웹캠)은 설정 변수들이 정의된 후 렌더링
     with col1:
         st.markdown("### 📹 웹캠 영상")
 
-        # 웹캠 제어 버튼
-        button_col1, button_col2 = st.columns(2)
-        with button_col1:
-            if st.button("▶️ 웹캠 시작", use_container_width=True, disabled=st.session_state.webcam_running):
-                st.session_state.webcam_running = True
-                st.rerun()
+        class VideoProcessor:
+            def __init__(self):
+                self.lock = threading.Lock()
+                self.pose_landmarker = None
+                self.hand_landmarker = None
+                self.frame_timestamp_ms = 0
+                self.frame_count = 0
+                self.pose_data = []
+                self.hand_data = []
+                self.prev_time = time.time()
+                self.fps = 0
 
-        with button_col2:
-            if st.button("⏹️ 웹캠 중지", use_container_width=True, disabled=not st.session_state.webcam_running):
-                st.session_state.webcam_running = False
-                st.rerun()
-
-        # 웹캠 영상 표시 영역
-        video_placeholder = st.empty()
-        fps_placeholder = st.empty()
-
-        if st.session_state.webcam_running:
-            # MediaPipe Pose Landmarker 초기화 (새 API)
-            pose_model_path = os.path.join(os.path.dirname(__file__), "models", "pose_landmarker_lite.task")
-
-            # PoseLandmarker 옵션 설정
-            pose_base_options = python.BaseOptions(model_asset_path=pose_model_path)
-            pose_options = vision.PoseLandmarkerOptions(
-                base_options=pose_base_options,
-                running_mode=vision.RunningMode.VIDEO,
-                min_pose_detection_confidence=min_detection_confidence,
-                min_tracking_confidence=min_tracking_confidence
-            )
-
-            pose_landmarker = vision.PoseLandmarker.create_from_options(pose_options)
-
-            # MediaPipe Hand Landmarker 초기화 (enable_hands가 True일 때만)
-            hand_landmarker = None
-            if enable_hands:
-                hand_model_path = os.path.join(os.path.dirname(__file__), "models", "hand_landmarker.task")
-
-                # HandLandmarker 옵션 설정
-                hand_base_options = python.BaseOptions(model_asset_path=hand_model_path)
-                hand_options = vision.HandLandmarkerOptions(
-                    base_options=hand_base_options,
+            def _initialize_landmarkers(self):
+                # PoseLandmarker 초기화
+                pose_model_path = os.path.join(os.path.dirname(__file__), "models", "pose_landmarker_lite.task")
+                pose_base_options = python.BaseOptions(model_asset_path=pose_model_path)
+                pose_options = vision.PoseLandmarkerOptions(
+                    base_options=pose_base_options,
                     running_mode=vision.RunningMode.VIDEO,
-                    num_hands=2,  # 최대 2개의 손 감지
-                    min_hand_detection_confidence=min_detection_confidence,
-                    min_tracking_confidence=min_tracking_confidence
-                )
+                    min_pose_detection_confidence=min_detection_confidence,
+                    min_tracking_confidence=min_tracking_confidence)
+                self.pose_landmarker = vision.PoseLandmarker.create_from_options(pose_options)
 
-                hand_landmarker = vision.HandLandmarker.create_from_options(hand_options)
+                # HandLandmarker 초기화 (활성화 시)
+                if enable_hands:
+                    hand_model_path = os.path.join(os.path.dirname(__file__), "models", "hand_landmarker.task")
+                    hand_base_options = python.BaseOptions(model_asset_path=hand_model_path)
+                    hand_options = vision.HandLandmarkerOptions(
+                        base_options=hand_base_options,
+                        running_mode=vision.RunningMode.VIDEO,
+                        num_hands=2,
+                        min_hand_detection_confidence=min_detection_confidence,
+                        min_tracking_confidence=min_tracking_confidence)
+                    self.hand_landmarker = vision.HandLandmarker.create_from_options(hand_options)
 
-            # 웹캠 초기화
-            cap = cv2.VideoCapture(0)
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+            def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
+                if not self.pose_landmarker:
+                    self._initialize_landmarkers()
+                
+                img = frame.to_ndarray(format="bgr24")
+                img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                img_rgb = cv2.flip(img_rgb, 1)
 
-            # FPS 계산을 위한 변수
-            prev_time = time.time()
-            fps = 0
-            frame_timestamp_ms = 0
+                mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img_rgb)
+                self.frame_timestamp_ms += 33  # Approx 30 FPS
 
-            try:
-                while st.session_state.webcam_running:
-                    ret, frame = cap.read()
-
-                    if not ret:
-                        st.error("❌ 웹캠에서 영상을 읽을 수 없습니다. 웹캠이 연결되어 있는지 확인하세요.")
-                        break
-
-                    # BGR을 RGB로 변환
-                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-                    # 좌우 반전 (거울 효과)
-                    frame_rgb = cv2.flip(frame_rgb, 1)
-
-                    # NumPy 배열을 MediaPipe Image로 변환
-                    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
-
-                    # 타임스탬프 증가 (밀리초 단위)
-                    frame_timestamp_ms += int(1000 / 30)  # 30 FPS 가정
-
-                    # MediaPipe Pose 감지
-                    pose_result = pose_landmarker.detect_for_video(mp_image, frame_timestamp_ms)
-
-                    # Pose 랜드마크 그리기
-                    if show_landmarks and pose_result.pose_landmarks:
-                        frame_rgb = draw_landmarks_on_image(frame_rgb, pose_result)
-
-                        # Pose 데이터 저장 (옵션이 켜져 있는 경우)
-                        if save_data:
-                            pose_landmarks = pose_result.pose_landmarks[0]
-                            landmarks_dict = {
-                                'frame': st.session_state.frame_count,
-                                'timestamp': time.time(),
-                                'landmarks': []
-                            }
-
-                            for idx, landmark in enumerate(pose_landmarks):
-                                landmarks_dict['landmarks'].append({
-                                    'id': idx,
-                                    'x': landmark.x,
-                                    'y': landmark.y,
-                                    'z': landmark.z,
-                                    'visibility': landmark.visibility
-                                })
-
-                            st.session_state.pose_landmarks_data.append(landmarks_dict)
-
-                    # MediaPipe Hands 감지 (활성화된 경우)
-                    hand_result = None
-                    if enable_hands and hand_landmarker:
-                        hand_result = hand_landmarker.detect_for_video(mp_image, frame_timestamp_ms)
-
-                        # Hands 랜드마크 그리기
-                        if hand_result.hand_landmarks:
-                            frame_rgb = draw_hands_on_image(frame_rgb, hand_result)
-
-                            # Hands 데이터 저장 (옵션이 켜져 있는 경우)
-                            if save_data:
-                                hands_dict = {
-                                    'frame': st.session_state.frame_count,
-                                    'timestamp': time.time(),
-                                    'hands': []
-                                }
-
-                                # 감지된 각 손에 대해
-                                for hand_idx, hand_landmarks in enumerate(hand_result.hand_landmarks):
-                                    hand_data = {
-                                        'hand_index': hand_idx,
-                                        'handedness': hand_result.handedness[hand_idx][0].category_name if hand_result.handedness else 'Unknown',
-                                        'landmarks': []
-                                    }
-
-                                    for idx, landmark in enumerate(hand_landmarks):
-                                        hand_data['landmarks'].append({
-                                            'id': idx,
-                                            'x': landmark.x,
-                                            'y': landmark.y,
-                                            'z': landmark.z
-                                        })
-
-                                    hands_dict['hands'].append(hand_data)
-
-                                st.session_state.hand_landmarks_data.append(hands_dict)
-
-                    # 프레임 카운트 증가 (데이터 저장 시)
-                    if save_data and (pose_result.pose_landmarks or (hand_result and hand_result.hand_landmarks)):
-                        st.session_state.frame_count += 1
-
-                    # FPS 계산
-                    current_time = time.time()
-                    fps = 1 / (current_time - prev_time)
-                    prev_time = current_time
-
-                    # FPS를 프레임에 표시
-                    cv2.putText(frame_rgb, f'FPS: {int(fps)}', (10, 30),
-                               cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-
-                    # 감지 상태 표시
-                    y_offset = 70
-                    if pose_result.pose_landmarks:
-                        cv2.putText(frame_rgb, 'Pose: OK', (10, y_offset),
-                                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-                    else:
-                        cv2.putText(frame_rgb, 'Pose: --', (10, y_offset),
-                                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, (128, 128, 128), 2)
-
-                    # Hands 감지 상태 표시
-                    if enable_hands:
-                        y_offset += 35
+                pose_result = self.pose_landmarker.detect_for_video(mp_image, self.frame_timestamp_ms)
+                hand_result = None
+                if enable_hands and self.hand_landmarker:
+                    hand_result = self.hand_landmarker.detect_for_video(mp_image, self.frame_timestamp_ms)
+                
+                with self.lock:
+                    if show_landmarks:
+                        if pose_result.pose_landmarks:
+                            img_rgb = draw_landmarks_on_image(img_rgb, pose_result)
                         if hand_result and hand_result.hand_landmarks:
-                            num_hands = len(hand_result.hand_landmarks)
-                            cv2.putText(frame_rgb, f'Hands: {num_hands}', (10, y_offset),
-                                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 255), 2)
-                        else:
-                            cv2.putText(frame_rgb, 'Hands: --', (10, y_offset),
-                                       cv2.FONT_HERSHEY_SIMPLEX, 0.8, (128, 128, 128), 2)
+                            img_rgb = draw_hands_on_image(img_rgb, hand_result)
 
-                    # Streamlit에 표시
-                    video_placeholder.image(frame_rgb, channels="RGB", use_container_width=True)
-                    fps_placeholder.metric("🎯 FPS (Frames Per Second)", f"{int(fps)}")
+                    if save_data:
+                        current_time_stamp = time.time()
+                        if pose_result.pose_landmarks:
+                            landmarks_dict = {'frame': self.frame_count, 'timestamp': current_time_stamp, 'landmarks': []}
+                            for idx, lm in enumerate(pose_result.pose_landmarks[0]):
+                                landmarks_dict['landmarks'].append({'id': idx, 'x': lm.x, 'y': lm.y, 'z': lm.z, 'visibility': lm.visibility})
+                            self.pose_data.append(landmarks_dict)
 
-                    # CPU 사용량 감소를 위한 짧은 대기
-                    time.sleep(0.01)
+                        if hand_result and hand_result.hand_landmarks:
+                            hands_dict = {'frame': self.frame_count, 'timestamp': current_time_stamp, 'hands': []}
+                            for hand_idx, hand_landmarks in enumerate(hand_result.hand_landmarks):
+                                hand_data = {'hand_index': hand_idx, 'handedness': hand_result.handedness[hand_idx][0].category_name, 'landmarks': []}
+                                for idx, lm in enumerate(hand_landmarks):
+                                    hand_data['landmarks'].append({'id': idx, 'x': lm.x, 'y': lm.y, 'z': lm.z})
+                                hands_dict['hands'].append(hand_data)
+                            self.hand_data.append(hands_dict)
+                        
+                        if pose_result.pose_landmarks or (hand_result and hand_result.hand_landmarks):
+                            self.frame_count += 1
+                
+                # FPS 계산
+                current_time = time.time()
+                self.fps = 1 / (current_time - self.prev_time)
+                self.prev_time = current_time
+                cv2.putText(img_rgb, f'FPS: {int(self.fps)}', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                
+                img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+                return av.VideoFrame.from_ndarray(img_bgr, format="bgr24")
 
-            except Exception as e:
-                st.error(f"❌ 에러 발생: {str(e)}")
-                import traceback
-                st.error(traceback.format_exc())
-            finally:
-                cap.release()
-                pose_landmarker.close()
-                if hand_landmarker:
-                    hand_landmarker.close()
-                st.session_state.webcam_running = False
+        webrtc_ctx = webrtc_streamer(
+            key="pose-test",
+            mode=WebRtcMode.SENDRECV,
+            rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
+            video_processor_factory=VideoProcessor,
+            media_stream_constraints={"video": True, "audio": False},
+            async_processing=True,
+        )
+
+        if webrtc_ctx.state.playing:
+            st.success("✅ 웹캠 실행 중")
+            if webrtc_ctx.video_processor:
+                 with webrtc_ctx.video_processor.lock:
+                    if save_data:
+                        st.session_state.pose_landmarks_data = webrtc_ctx.video_processor.pose_data
+                        st.session_state.hand_landmarks_data = webrtc_ctx.video_processor.hand_data
         else:
-            video_placeholder.info("▶️ '웹캠 시작' 버튼을 눌러 실시간 자세 감지를 시작하세요")
+            st.info("▶️ 'START' 버튼을 눌러 실시간 자세 감지를 시작하세요")
 
-    # 뒤로가기 버튼
-    st.markdown("---")
-    if st.button("🏠 홈으로 돌아가기", use_container_width=True):
-        # 웹캠이 실행 중이면 먼저 중지
-        if st.session_state.webcam_running:
-            st.session_state.webcam_running = False
-            st.warning("⏹️ 웹캠을 중지하는 중...")
-            time.sleep(0.5)  # 리소스 정리 대기
-        st.session_state.current_step = 'landing'
-        st.rerun()
+
+
 
 def convert_landmarks_to_csv(pose_landmarks_data, hand_landmarks_data):
     """Pose 및 Hands 랜드마크 데이터를 CSV 형식으로 변환"""
