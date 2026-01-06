@@ -26,9 +26,10 @@ import os
 from datetime import datetime
 from pathlib import Path
 import pandas as pd
+# WebRTC는 사용자 카메라에만 사용 (모바일 지원), 전문가 영상은 OpenCV 사용
+# 상세 내역: ISSUES_LOG.md [7] 참조
 from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
 import av
-import threading
 from typing import Union
 
 # ==================== 페이지 설정 ====================
@@ -2053,24 +2054,34 @@ def normalize_landmarks(landmarks):
     1. 골반 중심점을 기준점으로 설정 (landmark 23, 24의 중점)
     2. 어깨 너비로 스케일 정규화 (landmark 11, 12 거리)
     3. 모든 좌표를 상대 좌표로 변환
+
+    Args:
+        landmarks: MediaPipe PoseLandmark 리스트 또는 JSON dict 리스트
     """
     if not landmarks or len(landmarks) < 33:
         return None
 
+    # dict인지 객체인지 확인
+    is_dict = isinstance(landmarks[0], dict)
+
+    def get_value(lm, attr):
+        """dict 또는 객체에서 값 가져오기"""
+        return lm[attr] if is_dict else getattr(lm, attr)
+
     # 골반 중심점 계산 (landmark 23, 24)
     hip_left = landmarks[23]
     hip_right = landmarks[24]
-    hip_center_x = (hip_left.x + hip_right.x) / 2
-    hip_center_y = (hip_left.y + hip_right.y) / 2
-    hip_center_z = (hip_left.z + hip_right.z) / 2
+    hip_center_x = (get_value(hip_left, 'x') + get_value(hip_right, 'x')) / 2
+    hip_center_y = (get_value(hip_left, 'y') + get_value(hip_right, 'y')) / 2
+    hip_center_z = (get_value(hip_left, 'z') + get_value(hip_right, 'z')) / 2
 
     # 어깨 너비 계산 (landmark 11, 12)
     shoulder_left = landmarks[11]
     shoulder_right = landmarks[12]
     shoulder_width = np.sqrt(
-        (shoulder_right.x - shoulder_left.x)**2 +
-        (shoulder_right.y - shoulder_left.y)**2 +
-        (shoulder_right.z - shoulder_left.z)**2
+        (get_value(shoulder_right, 'x') - get_value(shoulder_left, 'x'))**2 +
+        (get_value(shoulder_right, 'y') - get_value(shoulder_left, 'y'))**2 +
+        (get_value(shoulder_right, 'z') - get_value(shoulder_left, 'z'))**2
     )
 
     if shoulder_width == 0:
@@ -2080,10 +2091,10 @@ def normalize_landmarks(landmarks):
     normalized = []
     for lm in landmarks:
         normalized.append({
-            'x': (lm.x - hip_center_x) / shoulder_width,
-            'y': (lm.y - hip_center_y) / shoulder_width,
-            'z': (lm.z - hip_center_z) / shoulder_width,
-            'visibility': lm.visibility if hasattr(lm, 'visibility') else 1.0
+            'x': (get_value(lm, 'x') - hip_center_x) / shoulder_width,
+            'y': (get_value(lm, 'y') - hip_center_y) / shoulder_width,
+            'z': (get_value(lm, 'z') - hip_center_z) / shoulder_width,
+            'visibility': get_value(lm, 'visibility') if (is_dict or hasattr(lm, 'visibility')) else 1.0
         })
 
     return normalized
@@ -2245,7 +2256,8 @@ def compare_poses(user_landmarks, expert_landmarks):
         }
 
     # 전체 점수 계산 (비교된 관절들의 평균)
-    overall_score = np.mean(list(joint_scores.values()))
+    scores_list = list(joint_scores.values())
+    overall_score = np.mean(scores_list) if scores_list else 0
 
     # 피드백 생성
     feedback = generate_feedback(angle_diffs, user_angles, expert_angles)
@@ -3542,6 +3554,10 @@ def show_action_select_page():
         st.rerun()
 
 def show_action_page():
+    print("="*80)
+    print("[DEBUG] show_action_page() 함수 시작!")
+    print("="*80)
+
     # 모바일 반응형 스타일 추가
     st.markdown("""
     <style>
@@ -3627,7 +3643,7 @@ def show_action_page():
 
     # 완료 후 재시도 옵션
     if st.session_state.action_completed_just_now:
-        st.success(f"✅ {action['name']} 동작을 완료했습니다!")
+        st.success(f"[완료] {action['name']} 동작을 완료했습니다!")
         col1, col2 = st.columns(2)
         with col1:
             if st.button("🔄 다시 연습하기", type="secondary", use_container_width=True):
@@ -3642,10 +3658,7 @@ def show_action_page():
                 st.rerun()
         return
 
-    # ===== WebRTC 방식으로 변경 (모바일 지원) =====
-    from queue import Queue
-
-    result_queue = Queue()
+    # ===== OpenCV 방식으로 구현 (안정적, ISSUES_LOG.md [2] 참조) =====
 
     # 세션 상태 초기화 (웹캠 제어용)
     if 'action_webcam_running' not in st.session_state:
@@ -3660,244 +3673,287 @@ def show_action_page():
     # 영상 파일 경로
     video_path = f"videos/{action['video_file']}"
 
-    # 웹캠 제어 버튼 (상단)
-    button_col1, button_col2, button_col3 = st.columns([1, 1, 4])
-    with button_col1:
-        if st.button("▶️ 웹캠 시작", key="action_start", use_container_width=True,
-                    disabled=st.session_state.action_webcam_running):
-            st.session_state.action_webcam_running = True
-            st.rerun()
+    # =============================================================================
+    # 전문가 영상 처리: 스켈레톤 그리기 + 랜드마크 추출
+    # - 이미 처리된 파일이 있으면 즉시 로드 (빠름)
+    # - 없으면 원본 영상 먼저 표시하고, 백그라운드 처리는 생략 (페이지 렌더링 우선)
+    # ISSUES_LOG.md [9] 참조
+    # =============================================================================
 
-    with button_col2:
-        if st.button("⏹️ 웹캠 중지", key="action_stop", use_container_width=True,
-                    disabled=not st.session_state.action_webcam_running):
-            st.session_state.action_webcam_running = False
-            st.rerun()
+    # 처리된 랜드마크 JSON 파일 경로
+    landmarks_dir = "data/expert_landmarks"
+    video_filename = os.path.basename(video_path)
+    video_name = os.path.splitext(video_filename)[0]
+    landmarks_json_path = f"{landmarks_dir}/{video_name}_landmarks.json"
 
-    # 2열 레이아웃: 전문가 | 사용자
-    col1, col2 = st.columns(2)
+    # 전문가 랜드마크 로드 (이미 처리된 경우에만)
+    expert_landmarks_data = None
+    expert_reference_landmarks = None
 
-    with col1:
-        st.markdown(f"#### {t('expert_demo')}")
-        expert_video_placeholder = st.empty()
-        # 전문가 시범 밑에 개선 포인트 표시
-        feedback_placeholder = st.empty()
+    # 디버깅: 파일 경로 출력
+    print(f"[DEBUG] 전문가 영상 파일 체크:")
+    print(f"   - 원본 영상: {video_path} (exists: {os.path.exists(video_path)})")
+    print(f"   - 랜드마크 JSON: {landmarks_json_path} (exists: {os.path.exists(landmarks_json_path)})")
 
-    with col2:
-        st.markdown(f"#### {t('your_movement')}")
-        user_video_placeholder = st.empty()
+    if os.path.exists(landmarks_json_path):
+        # 이미 처리된 JSON 파일이 있으면 로드
+        import json
+        try:
+            with open(landmarks_json_path, 'r', encoding='utf-8') as f:
+                expert_landmarks_data = json.load(f)
+            print(f"[OK] 전문가 랜드마크 로드: {len(expert_landmarks_data['frames'])}프레임")
 
-    if st.session_state.action_webcam_running:
-        # MediaPipe Pose Landmarker 초기화 (두 개 모두 VIDEO 모드)
-        pose_model_path = os.path.join(os.path.dirname(__file__), "models", "pose_landmarker_lite.task")
+            # 대표 프레임 선택 (중간 프레임)
+            total_frames = len(expert_landmarks_data['frames'])
+            mid_frame_idx = total_frames // 2
+            mid_frame_data = expert_landmarks_data['frames'][mid_frame_idx]
 
-        # 전문가 영상용 VIDEO 모드
-        expert_base_options = python.BaseOptions(model_asset_path=pose_model_path)
-        expert_options = vision.PoseLandmarkerOptions(
-            base_options=expert_base_options,
-            running_mode=vision.RunningMode.VIDEO,
-            min_pose_detection_confidence=0.5,
-            min_tracking_confidence=0.5
-        )
-        expert_pose_landmarker = vision.PoseLandmarker.create_from_options(expert_options)
+            if mid_frame_data['pose_landmarks']:
+                expert_reference_landmarks = mid_frame_data['pose_landmarks']
+                print(f"[OK] 대표 프레임 선택: {mid_frame_idx}/{total_frames}")
+            else:
+                print(f"[WARN] 대표 프레임에 pose 랜드마크 없음")
+        except Exception as e:
+            print(f"[WARN] 전문가 랜드마크 로드 실패: {e}")
+            expert_reference_landmarks = None
+    else:
+        # 처리되지 않은 경우 - 원본 영상 사용, 비교 기능 비활성화
+        print(f"[INFO] 전문가 영상 미처리: {video_filename}")
+        print(f"   - 자세 비교 기능은 비활성화됩니다")
+        expert_reference_landmarks = None
 
-        # 사용자 웹캠용 VIDEO 모드
-        user_base_options = python.BaseOptions(model_asset_path=pose_model_path)
-        user_options = vision.PoseLandmarkerOptions(
-            base_options=user_base_options,
-            running_mode=vision.RunningMode.VIDEO,
-            min_pose_detection_confidence=0.5,
-            min_tracking_confidence=0.5
-        )
-        user_pose_landmarker = vision.PoseLandmarker.create_from_options(user_options)
+    # 전문가 영상 처리 버튼 (JSON이 없는 경우만 표시)
+    if not os.path.exists(landmarks_json_path) and os.path.exists(video_path):
+        st.warning("[경고] 전문가 영상이 아직 처리되지 않았습니다. 자세 비교 기능을 사용하려면 처리가 필요합니다.")
 
-        # MediaPipe Hand Landmarker 초기화
-        hand_model_path = os.path.join(os.path.dirname(__file__), "models", "hand_landmarker.task")
+        if st.button("[처리] 전문가 영상 처리하기 (랜드마크 추출하여 자세 비교 활성화)", use_container_width=True):
+            with st.spinner("전문가 영상 처리 중... (최초 1회만, 1-2분 소요)"):
+                try:
+                    _, new_landmarks_path = process_expert_video_with_skeleton(video_path)
+                    if new_landmarks_path:
+                        st.success("[완료] 전문가 영상 처리 완료! 자동으로 새로고침합니다...")
+                        st.balloons()
+                        import time
+                        time.sleep(2)
+                        st.rerun()
+                    else:
+                        st.error("[실패] 전문가 영상 처리 실패. 콘솔 로그를 확인하세요.")
+                except Exception as e:
+                    st.error(f"[오류] 처리 중 오류 발생: {e}")
+                    import traceback
+                    traceback.print_exc()
 
-        # 전문가 영상용 Hand Landmarker
-        expert_hand_base_options = python.BaseOptions(model_asset_path=hand_model_path)
-        expert_hand_options = vision.HandLandmarkerOptions(
-            base_options=expert_hand_base_options,
-            running_mode=vision.RunningMode.VIDEO,
-            num_hands=2,
-            min_hand_detection_confidence=0.5,
-            min_tracking_confidence=0.5
-        )
-        expert_hand_landmarker = vision.HandLandmarker.create_from_options(expert_hand_options)
+    # =============================================================================
+    # 전문가 영상 먼저 표시 (한 번만 로드, 깜박임 방지)
+    # =============================================================================
+    st.markdown(f"#### {t('expert_demo')}")
 
-        # 사용자 웹캠용 Hand Landmarker
-        user_hand_base_options = python.BaseOptions(model_asset_path=hand_model_path)
-        user_hand_options = vision.HandLandmarkerOptions(
-            base_options=user_hand_base_options,
-            running_mode=vision.RunningMode.VIDEO,
-            num_hands=2,
-            min_hand_detection_confidence=0.5,
-            min_tracking_confidence=0.5
-        )
-        user_hand_landmarker = vision.HandLandmarker.create_from_options(user_hand_options)
+    if os.path.exists(video_path):
+        # 파일을 base64로 인코딩하여 data URL로 제공
+        import base64
+        with open(video_path, 'rb') as video_file:
+            video_bytes = video_file.read()
+        video_base64 = base64.b64encode(video_bytes).decode('utf-8')
 
-        # 전문가 영상 캡처 초기화
-        expert_cap = None
-        expert_landmarks = None
-        if os.path.exists(video_path):
-            expert_cap = cv2.VideoCapture(video_path)
-            expert_fps = expert_cap.get(cv2.CAP_PROP_FPS) or 30
-        else:
-            expert_video_placeholder.info(f"{action['name']} 시범 영상 - 업로드 예정")
+        # HTML video 태그로 autoplay, loop 설정
+        video_html = f"""
+        <video width="100%" autoplay loop muted playsinline style="border-radius: 10px;">
+            <source src="data:video/mp4;base64,{video_base64}" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+        """
+        st.markdown(video_html, unsafe_allow_html=True)
+        print(f"[OK] 전문가 영상 표시 (autoplay): {video_path}")
+    else:
+        st.info(f"{action['name']} 시범 영상 - 업로드 예정")
+        print(f"[WARN] 영상 파일 없음: {video_path}")
 
-        # 웹캠 초기화
-        cap = cv2.VideoCapture(0)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    # 피드백 표시 영역
+    feedback_placeholder = st.empty()
 
-        # 타임스탬프 초기화
-        expert_timestamp_ms = 0
-        user_timestamp_ms = 0
-        user_frame_count = 0
+    st.markdown("---")
+    st.markdown(f"#### {t('your_movement')}")
 
-        # 비교 간격 (1초 = 30프레임, 30fps 기준)
-        comparison_interval = 30
-        last_comparison_frame = -30  # 첫 프레임부터 즉시 비교 시작
+    # =============================================================================
+    # 사용자 카메라: WebRTC 사용 (모바일 지원)
+    # 주의: OpenCV는 사용하지 않음 (모바일 브라우저에서 카메라 접근 불가)
+    # 전문가 영상은 OpenCV로 처리 (파일 재생)
+    # 상세: ISSUES_LOG.md [7] 참조
+    # =============================================================================
 
-        # 랜드마크 초기화
-        expert_landmarks = None
-        user_landmarks = None
+    # =============================================================================
+    # MediaPipe 초기화 (WebRTC 콜백 외부에서 생성)
+    # 이유: WebRTC 콜백은 별도 스레드에서 실행되어 st.session_state 접근 불가
+    # 해결: 콜백 외부에서 생성 후 클로저로 전달
+    # 상세: ISSUES_LOG.md [8-3] 참조
+    # =============================================================================
+
+    # MediaPipe Pose 초기화
+    pose_model_path = os.path.join(os.path.dirname(__file__), "models", "pose_landmarker_lite.task")
+    pose_base_options = python.BaseOptions(model_asset_path=pose_model_path)
+    pose_options = vision.PoseLandmarkerOptions(
+        base_options=pose_base_options,
+        running_mode=vision.RunningMode.VIDEO,
+        min_pose_detection_confidence=0.5,
+        min_tracking_confidence=0.5
+    )
+    user_pose_landmarker = vision.PoseLandmarker.create_from_options(pose_options)
+
+    # MediaPipe Hand 초기화
+    hand_model_path = os.path.join(os.path.dirname(__file__), "models", "hand_landmarker.task")
+    hand_base_options = python.BaseOptions(model_asset_path=hand_model_path)
+    hand_options = vision.HandLandmarkerOptions(
+        base_options=hand_base_options,
+        running_mode=vision.RunningMode.VIDEO,
+        num_hands=2,
+        min_hand_detection_confidence=0.5,
+        min_tracking_confidence=0.5
+    )
+    user_hand_landmarker = vision.HandLandmarker.create_from_options(hand_options)
+
+    # timestamp를 mutable 객체로 관리 (콜백 내에서 수정 가능하도록)
+    # 피드백 데이터도 저장하여 메인 스레드에서 읽을 수 있도록 함
+    user_state = {
+        'timestamp_ms': 0,
+        'latest_landmarks': None,
+        'feedback_score': 0,
+        'feedback_messages': [],
+    }
+
+    # WebRTC 비디오 프레임 콜백 함수
+    def video_frame_callback(frame: av.VideoFrame) -> av.VideoFrame:
+        """
+        사용자 카메라 프레임 처리 (WebRTC)
+        - 모바일 지원을 위해 WebRTC 사용
+        - OpenCV는 사용 안 함 (모바일에서 작동 안 함)
+        - MediaPipe 객체는 클로저로 전달받음 (별도 스레드에서 실행되므로)
+        - feedback_placeholder도 클로저로 전달받아 직접 업데이트
+        """
+        img = frame.to_ndarray(format="rgb24")
+
+        # 좌우 반전 (거울 효과)
+        img = cv2.flip(img, 1)
 
         try:
-            while st.session_state.action_webcam_running:
-                # 1. 전문가 영상 프레임 읽기
-                if expert_cap and expert_cap.isOpened():
-                    ret_expert, expert_frame = expert_cap.read()
+            # MediaPipe Image로 변환
+            user_mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img)
 
-                    # 영상 끝나면 처음부터 다시 재생 (루프)
-                    if not ret_expert:
-                        expert_cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                        ret_expert, expert_frame = expert_cap.read()
+            # Pose 감지
+            user_result = user_pose_landmarker.detect_for_video(
+                user_mp_image,
+                user_state['timestamp_ms']
+            )
 
-                    if ret_expert:
-                        expert_frame_rgb = cv2.cvtColor(expert_frame, cv2.COLOR_BGR2RGB)
+            # Pose 랜드마크 그리기
+            if user_result.pose_landmarks:
+                img = draw_landmarks_on_image(img, user_result)
+                user_state['latest_landmarks'] = user_result.pose_landmarks[0]
 
-                        # MediaPipe Image로 변환
-                        expert_mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=expert_frame_rgb)
+                # 전문가 자세와 비교 (expert_reference_landmarks가 있으면)
+                if expert_reference_landmarks:
+                    try:
+                        comparison_result = compare_poses(
+                            user_result.pose_landmarks[0],
+                            expert_reference_landmarks
+                        )
 
-                        # Pose 감지
-                        expert_result = expert_pose_landmarker.detect_for_video(expert_mp_image, expert_timestamp_ms)
+                        # user_state에 피드백 저장 (메인 스레드에서 읽을 수 있도록)
+                        score = comparison_result['overall_score']
+                        feedback_messages = comparison_result['feedback']
 
-                        # Pose 랜드마크 그리기
-                        if expert_result.pose_landmarks:
-                            expert_frame_rgb = draw_landmarks_on_image(expert_frame_rgb, expert_result)
-                            expert_landmarks = expert_result.pose_landmarks[0]
+                        user_state['feedback_score'] = score
+                        user_state['feedback_messages'] = feedback_messages
 
-                        # Hand 감지 및 그리기
-                        expert_hand_result = expert_hand_landmarker.detect_for_video(expert_mp_image, expert_timestamp_ms)
-                        if expert_hand_result.hand_landmarks:
-                            expert_frame_rgb = draw_hands_on_image(expert_frame_rgb, expert_hand_result)
+                        # st.session_state도 업데이트
+                        try:
+                            st.session_state.comparison_score = score
+                            st.session_state.comparison_feedback = feedback_messages
+                        except:
+                            pass
 
-                        # 전문가 영상 표시
-                        expert_video_placeholder.image(expert_frame_rgb, channels="RGB", use_container_width=True)
+                    except Exception as e:
+                        print(f"[ERROR] 자세 비교 실패: {e}")
+            else:
+                # 자세 미감지
+                cv2.putText(img, 'Pose: Not Detected', (10, 30),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
+                user_state['latest_landmarks'] = None
+                user_state['feedback_score'] = 0
+                user_state['feedback_messages'] = []
 
-                        # 타임스탬프 증가
-                        expert_timestamp_ms += int(1000 / expert_fps)
+            # Hand 감지 및 그리기
+            hand_result = user_hand_landmarker.detect_for_video(
+                user_mp_image,
+                user_state['timestamp_ms']
+            )
+            if hand_result.hand_landmarks:
+                img = draw_hands_on_image(img, hand_result)
 
-                # 2. 사용자 웹캠 프레임 읽기
-                ret_user, user_frame = cap.read()
-
-                if not ret_user:
-                    st.error("❌ 웹캠에서 영상을 읽을 수 없습니다.")
-                    break
-
-                # BGR을 RGB로 변환
-                user_frame_rgb = cv2.cvtColor(user_frame, cv2.COLOR_BGR2RGB)
-
-                # 좌우 반전 (거울 효과)
-                user_frame_rgb = cv2.flip(user_frame_rgb, 1)
-
-                # MediaPipe Image로 변환
-                user_mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=user_frame_rgb)
-
-                # Pose 감지 (매 프레임)
-                user_result = user_pose_landmarker.detect_for_video(user_mp_image, user_timestamp_ms)
-
-                # 랜드마크 그리기
-                if user_result.pose_landmarks:
-                    user_frame_rgb = draw_landmarks_on_image(user_frame_rgb, user_result)
-                    user_landmarks = user_result.pose_landmarks[0]
-
-                    # 자세 비교 (1초마다 한번)
-                    if user_frame_count - last_comparison_frame >= comparison_interval:
-                        if expert_landmarks:
-                            comparison_result = compare_poses(user_landmarks, expert_landmarks)
-                            st.session_state.comparison_score = comparison_result['overall_score']
-                            st.session_state.comparison_feedback = comparison_result['feedback']
-                            st.session_state.joint_coverage_percent = comparison_result['joint_coverage_percent']
-                            last_comparison_frame = user_frame_count
-                else:
-                    # 자세 미감지
-                    cv2.putText(user_frame_rgb, 'Pose: Not Detected', (10, 30),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
-
-                # Hand 감지 및 그리기
-                user_hand_result = user_hand_landmarker.detect_for_video(user_mp_image, user_timestamp_ms)
-                if user_hand_result.hand_landmarks:
-                    user_frame_rgb = draw_hands_on_image(user_frame_rgb, user_hand_result)
-
-                # 사용자 웹캠 표시
-                user_video_placeholder.image(user_frame_rgb, channels="RGB", use_container_width=True)
-
-                # 피드백 표시 (전문가 시범 밑에)
-                if st.session_state.comparison_score > 0:
-                    score_color = "🟢" if st.session_state.comparison_score >= 80 else "🟡" if st.session_state.comparison_score >= 60 else "🔴"
-
-                    # 점수와 감지율을 같은 줄에 표시
-                    coverage_percent = st.session_state.get('joint_coverage_percent', 100)
-                    feedback_text = f"**{score_color} {st.session_state.comparison_score:.0f}점, 카메라에 감지된 관절: {coverage_percent}%**\n\n"
-
-                    if st.session_state.comparison_feedback:
-                        # 각 피드백 항목 사이에 줄바꿈 추가
-                        for fb in st.session_state.comparison_feedback:
-                            feedback_text += f"{fb}\n\n"
-                    else:
-                        feedback_text += "🟢 완벽합니다!"
-
-                    feedback_placeholder.markdown(feedback_text)
-                elif user_result.pose_landmarks and expert_landmarks:
-                    feedback_placeholder.info("분석 중...")
-                else:
-                    feedback_placeholder.info("전신이 보이도록 자세를 취해주세요")
-
-                # 타임스탬프 증가
-                user_timestamp_ms += int(1000 / 30)
-                user_frame_count += 1
-
-                # CPU 사용량 감소
-                time.sleep(0.01)
+            # 타임스탬프 증가
+            user_state['timestamp_ms'] += 33  # ~30fps
 
         except Exception as e:
-            st.error(f"❌ 오류 발생: {str(e)}")
-        finally:
-            cap.release()
-            if expert_cap:
-                expert_cap.release()
-            expert_pose_landmarker.close()
-            user_pose_landmarker.close()
-            expert_hand_landmarker.close()
-            user_hand_landmarker.close()
-            st.session_state.action_webcam_running = False
-    else:
-        # 웹캠 중지 상태일 때
-        if os.path.exists(video_path):
-            expert_video_placeholder.video(video_path)
-        else:
-            expert_video_placeholder.info(f"{action['name']} 시범 영상 - 업로드 예정")
+            # 에러 발생 시 에러 메시지 표시 및 원본 프레임 반환
+            import traceback
+            error_msg = f"MediaPipe Error: {str(e)}"
+            print(error_msg)
+            print(traceback.format_exc())
+            cv2.putText(img, 'Error: Check console', (10, 30),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
-        user_video_placeholder.info(t('webcam_guide'))
-        feedback_placeholder.info("웹캠을 시작하고 자세를 취하면 즉시 피드백이 표시됩니다")
+        return av.VideoFrame.from_ndarray(img, format="rgb24")
+
+    # WebRTC 스트리머 설정
+    # 사용자는 WebRTC의 START 버튼만 누르면 됨 (별도 "웹캠 시작" 버튼 불필요)
+    webrtc_ctx = webrtc_streamer(
+        key="user_camera_action",
+        mode=WebRtcMode.SENDRECV,
+        rtc_configuration=RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}),
+        video_frame_callback=video_frame_callback,
+        media_stream_constraints={"video": True, "audio": False},
+        async_processing=True,
+    )
+
+    # =============================================================================
+    # 피드백 업데이트 (WebRTC playing 중일 때만)
+    # - 전문가 영상은 이미 위에서 한 번 표시되었으므로 다시 로드되지 않음
+    # - user_state를 읽어서 피드백만 업데이트
+    # - st_autorefresh로 2초마다 업데이트 (영상은 깜박이지 않음)
+    # =============================================================================
+    if webrtc_ctx.state.playing:
+        st.session_state.action_webcam_running = True
+
+        # 2초마다 피드백 업데이트 (전문가 영상은 이미 로드되어 깜박이지 않음)
+        from streamlit_autorefresh import st_autorefresh
+        count = st_autorefresh(interval=2000, key="feedback_refresh")
+
+        # user_state에서 최신 피드백 읽기
+        if user_state['feedback_score'] > 0:
+            score = user_state['feedback_score']
+            feedback_messages = user_state['feedback_messages']
+
+            # 점수에 따른 색상
+            score_color = "🟢" if score >= 80 else "🟡" if score >= 60 else "🔴"
+
+            # 피드백 텍스트 구성
+            feedback_text = f"**{score_color} {score:.0f}점**\n\n"
+            if feedback_messages:
+                for fb in feedback_messages:
+                    feedback_text += f"{fb}\n\n"
+
+            feedback_placeholder.markdown(feedback_text)
+            st.session_state.comparison_score = score
+        else:
+            feedback_placeholder.info("💃 자세를 취해주세요! 전문가 동작과 실시간 비교가 시작됩니다.")
+    else:
+        feedback_placeholder.info("▶️ START 버튼을 눌러 카메라를 시작하세요.")
+        st.session_state.action_webcam_running = False
 
     # 완료 조건 체크 (점수 80점 이상)
     if st.session_state.comparison_score >= 80:
         if st.session_state.current_action not in st.session_state.completed_actions:
             st.session_state.completed_actions.append(st.session_state.current_action)
-            st.success(f"✅ {action['name']} 동작을 완료했습니다!")
+            st.success(f"[완료] {action['name']} 동작을 완료했습니다!")
             st.balloons()
 
     # 다음 동작으로 이동 버튼
@@ -3919,91 +3975,152 @@ def show_action_page():
         st.session_state.badges.append(completed_count)
         st.success(f"{badge['emoji']} {badge['name']} {t('badge_earned')} {badge['message']}")
 
-    return  # 여기서 함수 종료
 
-    # ===== 아래 코드는 사용되지 않음 (삭제 대상) =====
-    # 전문가 영상 처리 함수 (skeleton 그리기)
-    def process_expert_video_with_skeleton(expert_video_path):
-        """전문가 영상에 skeleton을 그려서 새 영상 생성"""
-        if not os.path.exists(expert_video_path):
-            return None
+# =============================================================================
+# 두 번째 compare_poses 함수 삭제 (첫 번째 각도 기반 함수 사용)
+# app_v18.py:2190의 각도 기반 compare_poses를 사용
+# =============================================================================
 
-        try:
-            # 출력 파일 경로
-            output_dir = "data/processed_videos"
-            os.makedirs(output_dir, exist_ok=True)
-            video_filename = os.path.basename(expert_video_path)
-            output_path = os.path.join(output_dir, f"skeleton_{video_filename}")
 
-            # 이미 처리된 파일이 있으면 반환
-            if os.path.exists(output_path):
-                return output_path
+# =============================================================================
+# 전문가 영상 처리 함수 (스켈레톤 그리기 + 랜드마크 JSON 저장)
+# ISSUES_LOG.md [9] 참조
+# =============================================================================
+def process_expert_video_with_skeleton(expert_video_path):
+    """
+    전문가 영상에 skeleton을 그려서 새 영상 생성 + 랜드마크를 JSON으로 저장
 
-            # MediaPipe 초기화
-            pose_model_path = os.path.join(os.path.dirname(__file__), "models", "pose_landmarker_lite.task")
-            pose_base_options = python.BaseOptions(model_asset_path=pose_model_path)
-            pose_options = vision.PoseLandmarkerOptions(
-                base_options=pose_base_options,
-                running_mode=vision.RunningMode.VIDEO
-            )
-            pose_landmarker = vision.PoseLandmarker.create_from_options(pose_options)
+    Returns:
+        tuple: (skeleton 영상 경로, landmarks JSON 경로) 또는 (None, None)
+    """
+    if not os.path.exists(expert_video_path):
+        return None, None
 
-            hand_model_path = os.path.join(os.path.dirname(__file__), "models", "hand_landmarker.task")
-            hand_base_options = python.BaseOptions(model_asset_path=hand_model_path)
-            hand_options = vision.HandLandmarkerOptions(
-                base_options=hand_base_options,
-                running_mode=vision.RunningMode.VIDEO,
-                num_hands=2
-            )
-            hand_landmarker = vision.HandLandmarker.create_from_options(hand_options)
+    try:
+        # 출력 파일 경로
+        # Streamlit 미디어 서버는 videos/ 디렉토리만 서빙 → skeleton 비디오는 videos/processed/에 저장
+        output_dir = "videos/processed"
+        landmarks_dir = "data/expert_landmarks"
+        os.makedirs(output_dir, exist_ok=True)
+        os.makedirs(landmarks_dir, exist_ok=True)
 
-            # 영상 읽기
-            cap = cv2.VideoCapture(expert_video_path)
-            fps = cap.get(cv2.CAP_PROP_FPS) or 30
-            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        video_filename = os.path.basename(expert_video_path)
+        video_name = os.path.splitext(video_filename)[0]
+        output_video_path = os.path.join(output_dir, f"skeleton_{video_filename}")
+        output_landmarks_path = os.path.join(landmarks_dir, f"{video_name}_landmarks.json")
 
-            # 비디오 writer 설정
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+        # 이미 처리된 파일이 있으면 반환
+        if os.path.exists(output_video_path) and os.path.exists(output_landmarks_path):
+            return output_video_path, output_landmarks_path
 
-            frame_timestamp_ms = 0
-            frame_count = 0
+        print(f"전문가 영상 처리 중: {video_filename}...")
 
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
+        # MediaPipe 초기화
+        pose_model_path = os.path.join(os.path.dirname(__file__), "models", "pose_landmarker_lite.task")
+        pose_base_options = python.BaseOptions(model_asset_path=pose_model_path)
+        pose_options = vision.PoseLandmarkerOptions(
+            base_options=pose_base_options,
+            running_mode=vision.RunningMode.VIDEO
+        )
+        pose_landmarker = vision.PoseLandmarker.create_from_options(pose_options)
 
-                # RGB 변환
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
-                frame_timestamp_ms = int(frame_count * 1000 / fps)
+        hand_model_path = os.path.join(os.path.dirname(__file__), "models", "hand_landmarker.task")
+        hand_base_options = python.BaseOptions(model_asset_path=hand_model_path)
+        hand_options = vision.HandLandmarkerOptions(
+            base_options=hand_base_options,
+            running_mode=vision.RunningMode.VIDEO,
+            num_hands=2
+        )
+        hand_landmarker = vision.HandLandmarker.create_from_options(hand_options)
 
-                # Pose detection
-                pose_result = pose_landmarker.detect_for_video(mp_image, frame_timestamp_ms)
-                if pose_result.pose_landmarks:
-                    frame_rgb = draw_landmarks_on_image(frame_rgb, pose_result)
+        # 영상 읽기
+        cap = cv2.VideoCapture(expert_video_path)
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-                # Hand detection
-                hand_result = hand_landmarker.detect_for_video(mp_image, frame_timestamp_ms)
-                if hand_result.hand_landmarks:
-                    frame_rgb = draw_hands_on_image(frame_rgb, hand_result)
+        # 비디오 writer 설정
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out = cv2.VideoWriter(output_video_path, fourcc, fps, (width, height))
 
-                # BGR로 변환하여 저장
-                frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
-                out.write(frame_bgr)
+        # 랜드마크 저장용 리스트
+        all_landmarks = []
 
-                frame_count += 1
+        frame_timestamp_ms = 0
+        frame_count = 0
 
-            cap.release()
-            out.release()
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
 
-            return output_path
+            # RGB 변환
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
+            frame_timestamp_ms = int(frame_count * 1000 / fps)
 
-        except Exception as e:
-            print(f"전문가 영상 처리 실패: {e}")
-            return None
+            # 프레임 데이터 초기화
+            frame_data = {
+                'frame': frame_count,
+                'timestamp_ms': frame_timestamp_ms,
+                'pose_landmarks': None,
+                'hand_landmarks': []
+            }
+
+            # Pose detection
+            pose_result = pose_landmarker.detect_for_video(mp_image, frame_timestamp_ms)
+            if pose_result.pose_landmarks:
+                frame_rgb = draw_landmarks_on_image(frame_rgb, pose_result)
+                # 랜드마크를 dict로 변환하여 저장
+                frame_data['pose_landmarks'] = [
+                    {'x': lm.x, 'y': lm.y, 'z': lm.z, 'visibility': lm.visibility}
+                    for lm in pose_result.pose_landmarks[0]
+                ]
+
+            # Hand detection
+            hand_result = hand_landmarker.detect_for_video(mp_image, frame_timestamp_ms)
+            if hand_result.hand_landmarks:
+                frame_rgb = draw_hands_on_image(frame_rgb, hand_result)
+                # 각 손의 랜드마크 저장
+                frame_data['hand_landmarks'] = [
+                    [{'x': lm.x, 'y': lm.y, 'z': lm.z} for lm in hand]
+                    for hand in hand_result.hand_landmarks
+                ]
+
+            all_landmarks.append(frame_data)
+
+            # BGR로 변환하여 저장
+            frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+            out.write(frame_bgr)
+
+            frame_count += 1
+
+        cap.release()
+        out.release()
+
+        # 랜드마크를 JSON 파일로 저장
+        import json
+        with open(output_landmarks_path, 'w', encoding='utf-8') as f:
+            json.dump({
+                'video_name': video_filename,
+                'fps': fps,
+                'total_frames': frame_count,
+                'width': width,
+                'height': height,
+                'frames': all_landmarks
+            }, f, indent=2)
+
+        print(f"[OK] 처리 완료: {frame_count}프레임")
+        print(f"   - 영상: {output_video_path}")
+        print(f"   - 랜드마크: {output_landmarks_path}")
+
+        return output_video_path, output_landmarks_path
+
+    except Exception as e:
+        import traceback
+        print(f"[ERROR] 전문가 영상 처리 실패: {e}")
+        print(traceback.format_exc())
+        return None, None
 
     # 전문가 영상에서 대표 자세 landmarks 추출
     def extract_expert_landmarks(expert_video_path):

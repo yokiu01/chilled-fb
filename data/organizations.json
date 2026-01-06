@@ -1,0 +1,18 @@
+{
+  "org_1767210180": {
+    "id": "org_1767210180",
+    "name": "SERG",
+    "type": "학원",
+    "email": "ESRG",
+    "password": "ERG",
+    "manager": "ESRG",
+    "address": "SERG",
+    "phone": "SERG",
+    "created_at": "2026-01-01T04:43:00.174220",
+    "selected_basic_actions": [
+      5
+    ],
+    "selected_expanded_actions": [],
+    "selected_creative_actions": []
+  }
+}

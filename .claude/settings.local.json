@@ -17,7 +17,15 @@
       "Bash(git push:*)",
       "Bash(git commit:*)",
       "Bash(cp:*)",
-      "Bash(ping:*)"
+      "Bash(ping:*)",
+      "Bash(dir:*)",
+      "Bash(awk:*)",
+      "Bash(powershell:*)",
+      "Bash(copy \"data\\\\processed_videos\\\\skeleton_*.mp4\" \"videos\\\\processed\"\")",
+      "Bash(python app_v18.py:*)",
+      "Bash(git pull:*)",
+      "Bash(git rebase:*)",
+      "Bash(git add:*)"
     ]
   }
 }

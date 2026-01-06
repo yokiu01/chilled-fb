@@ -3026,10 +3026,11 @@ def main():
     with st.sidebar:
         st.markdown("### 🌐 Language / 언어")
         lang_option = st.selectbox(
-            "",
+            "Language / 언어",
             ["🇰🇷 한국어", "🇺🇸 English"],
             index=0 if st.session_state.language == 'ko' else 1,
-            key='lang_selector'
+            key='lang_selector',
+            label_visibility="collapsed"
         )
         
         # 언어 변경 감지
@@ -3040,14 +3041,14 @@ def main():
         
         # DNA 갤러리 메뉴
         st.markdown("---")
-        if st.button(t('explore_all_dna'), use_container_width=True):
+        if st.button(t('explore_all_dna'), width='stretch'):
             st.session_state.current_step = 'dna_gallery'
             st.rerun()
 
         # 동작 테스트 메뉴
         st.markdown("---")
         st.markdown("### 🎯 동작 테스트")
-        if st.button("📹 실시간 자세 감지", use_container_width=True):
+        if st.button("📹 실시간 자세 감지", width='stretch'):
             st.session_state.current_step = 'pose_test'
             st.rerun()
 
@@ -3058,28 +3059,28 @@ def main():
         if st.session_state.expert_logged_in:
             expert = get_experts().get(st.session_state.expert_id, {})
             st.markdown(f"**{expert.get('name', '전문가')}** 님")
-            if st.button(t('expert_my_profile'), use_container_width=True):
+            if st.button(t('expert_my_profile'), width='stretch'):
                 st.session_state.current_step = 'expert_profile'
                 st.rerun()
-            if st.button(t('expert_upload_video'), use_container_width=True):
+            if st.button(t('expert_upload_video'), width='stretch'):
                 st.session_state.current_step = 'expert_upload'
                 st.rerun()
-            if st.button(t('expert_logout'), use_container_width=True):
+            if st.button(t('expert_logout'), width='stretch'):
                 st.session_state.expert_logged_in = False
                 st.session_state.expert_id = None
                 st.rerun()
         else:
-            if st.button(t('expert_login'), use_container_width=True):
+            if st.button(t('expert_login'), width='stretch'):
                 st.session_state.current_step = 'expert_login'
                 st.rerun()
-            if st.button(t('expert_signup'), use_container_width=True):
+            if st.button(t('expert_signup'), width='stretch'):
                 st.session_state.current_step = 'expert_signup'
                 st.rerun()
         
-        if st.button(t('expert_gallery'), use_container_width=True):
+        if st.button(t('expert_gallery'), width='stretch'):
             st.session_state.current_step = 'expert_gallery'
             st.rerun()
-        if st.button(t('expert_ranking'), use_container_width=True):
+        if st.button(t('expert_ranking'), width='stretch'):
             st.session_state.current_step = 'expert_ranking'
             st.rerun()
         
@@ -3090,31 +3091,31 @@ def main():
         if st.session_state.org_logged_in:
             org = get_organizations().get(st.session_state.org_id, {})
             st.markdown(f"**{org.get('name', '단체')}**")
-            if st.button(t('org_dashboard'), use_container_width=True):
+            if st.button(t('org_dashboard'), width='stretch'):
                 st.session_state.current_step = 'org_dashboard'
                 st.rerun()
-            if st.button(t('subscription_management'), use_container_width=True):
+            if st.button(t('subscription_management'), width='stretch'):
                 st.session_state.current_step = 'subscription_management'
                 st.rerun()
-            if st.button(t('instructor_management'), use_container_width=True):
+            if st.button(t('instructor_management'), width='stretch'):
                 st.session_state.current_step = 'instructor_management'
                 st.rerun()
-            if st.button(t('student_management'), use_container_width=True):
+            if st.button(t('student_management'), width='stretch'):
                 st.session_state.current_step = 'student_management'
                 st.rerun()
-            if st.button(t('custom_actions'), use_container_width=True):
+            if st.button(t('custom_actions'), width='stretch'):
                 st.session_state.current_step = 'custom_actions_setup'
                 st.rerun()
-            if st.button(t('org_logout'), use_container_width=True):
+            if st.button(t('org_logout'), width='stretch'):
                 st.session_state.org_logged_in = False
                 st.session_state.org_id = None
                 st.session_state.user_role = None
                 st.rerun()
         else:
-            if st.button(t('org_login'), use_container_width=True):
+            if st.button(t('org_login'), width='stretch'):
                 st.session_state.current_step = 'org_login'
                 st.rerun()
-            if st.button(t('org_signup'), use_container_width=True):
+            if st.button(t('org_signup'), width='stretch'):
                 st.session_state.current_step = 'org_signup'
                 st.rerun()
     
@@ -3245,11 +3246,11 @@ def show_landing_page():
         
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("전문가 갤러리 보기", type="primary", use_container_width=True):
+            if st.button("전문가 갤러리 보기", type="primary", width='stretch'):
                 st.session_state.current_step = 'expert_gallery'
                 st.rerun()
         with col2:
-            if st.button("전문가 랭킹 보기", type="primary", use_container_width=True):
+            if st.button("전문가 랭킹 보기", type="primary", width='stretch'):
                 st.session_state.current_step = 'expert_ranking'
                 st.rerun()
 
@@ -3265,7 +3266,7 @@ def show_landing_page():
         </div>
         """, unsafe_allow_html=True)
 
-        if st.button("📱 모바일 동작 테스트", type="primary", use_container_width=True):
+        if st.button("📱 모바일 동작 테스트", type="primary", width='stretch'):
             st.session_state.current_step = 'mobile_test'
             st.rerun()
 
@@ -3434,7 +3435,7 @@ def show_result_page():
                         st.markdown("")
         
         # 전체 갤러리 보기 버튼
-        if st.button(t('view_all_gallery'), type="secondary", use_container_width=True):
+        if st.button(t('view_all_gallery'), type="secondary", width='stretch'):
             st.session_state.current_step = 'dna_gallery'
             st.rerun()
     
@@ -3516,104 +3517,7 @@ def show_action_select_page():
         st.rerun()
 
 def show_action_page():
-    # 모바일 감지 JavaScript
-    st.markdown("""
-    <script>
-    const isMobileDevice = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-    if (isMobileDevice) {
-        window.isMobileDevice = true;
-    }
-    </script>
-    """, unsafe_allow_html=True)
-
-    # 모바일 사용자에게 안내 (현재는 PC에서만 실시간 비교 가능)
-    st.warning("""
-    ⚠️ **모바일 사용자 안내**
-
-    현재 이 페이지는 PC 웹캠을 사용하여 실시간 자세 비교를 제공합니다.
-
-    **모바일에서 자세 분석을 원하신다면:**
-    - 홈 화면으로 돌아가서
-    - "📱 모바일 동작 테스트" 버튼을 클릭하세요
-    - 스마트폰 카메라로 자세를 분석할 수 있습니다
-    """)
-
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("🏠 홈으로 돌아가기"):
-            st.session_state.current_step = 'landing'
-            st.rerun()
-    with col2:
-        if st.button("📱 모바일 테스트로 이동"):
-            st.session_state.current_step = 'mobile_test'
-            st.rerun()
-
-    st.markdown("---")
-
-    # 모바일 반응형 스타일 추가
-    st.markdown("""
-    <style>
-    /* 모바일 기본 스타일 */
-    @media (max-width: 768px) {
-        .main .block-container {
-            padding: 0.5rem;
-        }
-
-        .stButton button {
-            font-size: 0.9rem;
-            padding: 0.4rem 0.8rem;
-        }
-    }
-
-    /* 모바일 가로모드 레이아웃 */
-    @media (orientation: landscape) and (max-width: 900px) {
-        .video-row {
-            display: flex;
-            flex-direction: row;
-            gap: 0.5rem;
-        }
-
-        .video-column {
-            flex: 1;
-            max-width: 50%;
-        }
-
-        .stMarkdown h4 {
-            font-size: 1rem;
-        }
-
-        /* 버튼을 컴팩트하게 */
-        .action-controls {
-            display: flex;
-            gap: 0.5rem;
-        }
-
-        .action-controls .stButton {
-            flex: 1;
-        }
-    }
-
-    /* 모바일 세로모드 */
-    @media (orientation: portrait) and (max-width: 768px) {
-        .video-row {
-            display: flex;
-            flex-direction: column;
-        }
-
-        .video-column {
-            width: 100%;
-        }
-
-        .action-card {
-            padding: 0.5rem;
-        }
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-    # 현재 언어에 맞는 기본 동작 가져오기
     basic_actions = get_basic_actions(st.session_state.language)
-
     if st.session_state.current_action >= len(basic_actions):
         st.session_state.current_step = 'meme'
         st.rerun()
@@ -3621,27 +3525,25 @@ def show_action_page():
 
     action = basic_actions[st.session_state.current_action]
     progress = (st.session_state.current_action + 1) / len(basic_actions)
+    video_path = f"videos/{action['video_file']}"
 
-    # 헤더
+    # Header
     col1, col2, col3 = st.columns([1, 4, 1])
     with col1:
         if st.button(t('btn_prev')):
+            st.session_state.current_step = 'action_select' if st.session_state.current_action == 0 else 'action'
             if st.session_state.current_action > 0:
                 st.session_state.current_action -= 1
-            else:
-                st.session_state.current_step = 'action_select'
             st.rerun()
-
     with col2:
         st.markdown(f"### {action['name']} ({st.session_state.current_action + 1}/12)")
         st.progress(progress, text=f"{t('progress')}: {int(progress*100)}%")
-
     with col3:
         if st.button(t('btn_home')):
             st.session_state.current_step = 'landing'
             st.rerun()
 
-    # 동작 설명
+    # Action Description
     st.markdown(f"""
     <div class='action-card'>
         <h3>{action['description']}</h3>
@@ -3649,276 +3551,126 @@ def show_action_page():
         <small>💡 {action['historical_note']}</small>
     </div>
     """, unsafe_allow_html=True)
+    
+    # --- Refactored WebRTC Implementation ---
+    from queue import Queue
+    
+    result_queue = Queue()
 
-    # 세션 상태 초기화 (웹캠 제어용)
-    if 'action_webcam_running' not in st.session_state:
-        st.session_state.action_webcam_running = False
-    if 'comparison_score' not in st.session_state:
-        st.session_state.comparison_score = 0
-    if 'comparison_feedback' not in st.session_state:
-        st.session_state.comparison_feedback = []
-    if 'joint_coverage_percent' not in st.session_state:
-        st.session_state.joint_coverage_percent = 0
+    class ActionVideoProcessor:
+        def __init__(self) -> None:
+            self.lock = threading.Lock()
+            self.user_landmarker = vision.PoseLandmarker.create_from_options(
+                vision.PoseLandmarkerOptions(
+                    base_options=python.BaseOptions(model_asset_path='models/pose_landmarker_lite.task'),
+                    running_mode=vision.RunningMode.VIDEO))
+            self.expert_landmarker = vision.PoseLandmarker.create_from_options(
+                vision.PoseLandmarkerOptions(
+                    base_options=python.BaseOptions(model_asset_path='models/pose_landmarker_lite.task'),
+                    running_mode=vision.RunningMode.VIDEO))
+            
+            self.expert_video_path = f"videos/{basic_actions[st.session_state.current_action]['video_file']}"
+            self.expert_cap = cv2.VideoCapture(self.expert_video_path) if os.path.exists(self.expert_video_path) else None
+            
+            self.user_timestamp = 0
+            self.expert_timestamp = 0
 
-    # 영상 파일 경로
-    video_path = f"videos/{action['video_file']}"
+        def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
+            user_frame = frame.to_ndarray(format="bgr24")
+            user_frame_rgb = cv2.flip(cv2.cvtColor(user_frame, cv2.COLOR_BGR2RGB), 1)
 
-    # 웹캠 제어 버튼 (상단)
-    button_col1, button_col2, button_col3 = st.columns([1, 1, 4])
-    with button_col1:
-        if st.button("▶️ 웹캠 시작", key="action_start", use_container_width=True,
-                    disabled=st.session_state.action_webcam_running):
-            st.session_state.action_webcam_running = True
-            st.rerun()
+            # Process User Frame
+            user_mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=user_frame_rgb)
+            self.user_timestamp += 33
+            user_result = self.user_landmarker.detect_for_video(user_mp_image, self.user_timestamp)
+            
+            # Process Expert Frame
+            expert_frame_rgb = np.zeros_like(user_frame_rgb) # Default black screen
+            if self.expert_cap:
+                ret_expert, expert_frame = self.expert_cap.read()
+                if not ret_expert:
+                    self.expert_cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    ret_expert, expert_frame = self.expert_cap.read()
+                
+                if ret_expert:
+                    expert_frame_rgb = cv2.cvtColor(expert_frame, cv2.COLOR_BGR2RGB)
+                    expert_mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=expert_frame_rgb)
+                    self.expert_timestamp += 33
+                    expert_result = self.expert_landmarker.detect_for_video(expert_mp_image, self.expert_timestamp)
 
-    with button_col2:
-        if st.button("⏹️ 웹캠 중지", key="action_stop", use_container_width=True,
-                    disabled=not st.session_state.action_webcam_running):
-            st.session_state.action_webcam_running = False
-            st.rerun()
+                    # Comparison and Drawing
+                    if user_result.pose_landmarks and expert_result.pose_landmarks:
+                        user_landmarks = user_result.pose_landmarks[0]
+                        expert_landmarks = expert_result.pose_landmarks[0]
+                        
+                        user_frame_rgb = draw_landmarks_on_image(user_frame_rgb, user_result)
+                        expert_frame_rgb = draw_landmarks_on_image(expert_frame_rgb, expert_result)
 
-    # 2열 레이아웃: 전문가 | 사용자
-    col1, col2 = st.columns(2)
+                        comparison = compare_poses(user_landmarks, expert_landmarks)
+                        result_queue.put(comparison) # Put result in queue
+                        
+                        score = comparison['overall_score']
+                        score_color = (0, 255, 0) if score >= 80 else (0, 255, 255) if score >= 60 else (0, 0, 255)
+                        cv2.putText(user_frame_rgb, f"Score: {score:.0f}", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.5, score_color, 3)
+            
+            # Combine frames side-by-side
+            h1, w1, _ = expert_frame_rgb.shape
+            h2, w2, _ = user_frame_rgb.shape
+            
+            # Resize user frame to match expert frame height
+            if h1 != h2 and h1 > 0 and h2 > 0:
+                user_frame_rgb = cv2.resize(user_frame_rgb, (int(w2 * h1 / h2), h1))
 
-    with col1:
-        st.markdown(f"#### {t('expert_demo')}")
-        expert_video_placeholder = st.empty()
-        # 전문가 시범 밑에 개선 포인트 표시
-        feedback_placeholder = st.empty()
+            combined_frame = cv2.hconcat([expert_frame_rgb, user_frame_rgb])
 
-    with col2:
-        st.markdown(f"#### {t('your_movement')}")
-        user_video_placeholder = st.empty()
+            return av.VideoFrame.from_ndarray(cv2.cvtColor(combined_frame, cv2.COLOR_RGB2BGR), format="bgr24")
 
-    if st.session_state.action_webcam_running:
-        # MediaPipe Pose Landmarker 초기화 (두 개 모두 VIDEO 모드)
-        pose_model_path = os.path.join(os.path.dirname(__file__), "models", "pose_landmarker_lite.task")
+    # --- UI Section ---
+    webrtc_ctx = webrtc_streamer(
+        key="action-comparison",
+        mode=WebRtcMode.SENDRECV,
+        video_processor_factory=ActionVideoProcessor,
+        media_stream_constraints={"video": True, "audio": False},
+        async_processing=True,
+    )
 
-        # 전문가 영상용 VIDEO 모드
-        expert_base_options = python.BaseOptions(model_asset_path=pose_model_path)
-        expert_options = vision.PoseLandmarkerOptions(
-            base_options=expert_base_options,
-            running_mode=vision.RunningMode.VIDEO,
-            min_pose_detection_confidence=0.5,
-            min_tracking_confidence=0.5
-        )
-        expert_pose_landmarker = vision.PoseLandmarker.create_from_options(expert_options)
-
-        # 사용자 웹캠용 VIDEO 모드
-        user_base_options = python.BaseOptions(model_asset_path=pose_model_path)
-        user_options = vision.PoseLandmarkerOptions(
-            base_options=user_base_options,
-            running_mode=vision.RunningMode.VIDEO,
-            min_pose_detection_confidence=0.5,
-            min_tracking_confidence=0.5
-        )
-        user_pose_landmarker = vision.PoseLandmarker.create_from_options(user_options)
-
-        # MediaPipe Hand Landmarker 초기화
-        hand_model_path = os.path.join(os.path.dirname(__file__), "models", "hand_landmarker.task")
-
-        # 전문가 영상용 Hand Landmarker
-        expert_hand_base_options = python.BaseOptions(model_asset_path=hand_model_path)
-        expert_hand_options = vision.HandLandmarkerOptions(
-            base_options=expert_hand_base_options,
-            running_mode=vision.RunningMode.VIDEO,
-            num_hands=2,
-            min_hand_detection_confidence=0.5,
-            min_tracking_confidence=0.5
-        )
-        expert_hand_landmarker = vision.HandLandmarker.create_from_options(expert_hand_options)
-
-        # 사용자 웹캠용 Hand Landmarker
-        user_hand_base_options = python.BaseOptions(model_asset_path=hand_model_path)
-        user_hand_options = vision.HandLandmarkerOptions(
-            base_options=user_hand_base_options,
-            running_mode=vision.RunningMode.VIDEO,
-            num_hands=2,
-            min_hand_detection_confidence=0.5,
-            min_tracking_confidence=0.5
-        )
-        user_hand_landmarker = vision.HandLandmarker.create_from_options(user_hand_options)
-
-        # 전문가 영상 캡처 초기화
-        expert_cap = None
-        expert_landmarks = None
-        if os.path.exists(video_path):
-            expert_cap = cv2.VideoCapture(video_path)
-            expert_fps = expert_cap.get(cv2.CAP_PROP_FPS) or 30
-        else:
-            expert_video_placeholder.info(f"{action['name']} 시범 영상 - 업로드 예정")
-
-        # 웹캠 초기화
-        cap = cv2.VideoCapture(0)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-
-        # 타임스탬프 초기화
-        expert_timestamp_ms = 0
-        user_timestamp_ms = 0
-        user_frame_count = 0
-
-        # 비교 간격 (1초 = 30프레임, 30fps 기준)
-        comparison_interval = 30
-        last_comparison_frame = -30  # 첫 프레임부터 즉시 비교 시작
-
-        # 랜드마크 초기화
-        expert_landmarks = None
-        user_landmarks = None
-
-        try:
-            while st.session_state.action_webcam_running:
-                # 1. 전문가 영상 프레임 읽기
-                if expert_cap and expert_cap.isOpened():
-                    ret_expert, expert_frame = expert_cap.read()
-
-                    # 영상 끝나면 처음부터 다시 재생 (루프) - 타임스탬프는 계속 증가
-                    if not ret_expert:
-                        expert_cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                        # 타임스탬프는 리셋하지 않고 계속 증가 (단조 증가 보장)
-                        ret_expert, expert_frame = expert_cap.read()
-
-                    if ret_expert:
-                        expert_frame_rgb = cv2.cvtColor(expert_frame, cv2.COLOR_BGR2RGB)
-
-                        # MediaPipe Image로 변환
-                        expert_mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=expert_frame_rgb)
-
-                        # Pose 감지
-                        expert_result = expert_pose_landmarker.detect_for_video(expert_mp_image, expert_timestamp_ms)
-
-                        # Pose 랜드마크 그리기
-                        if expert_result.pose_landmarks:
-                            expert_frame_rgb = draw_landmarks_on_image(expert_frame_rgb, expert_result)
-                            expert_landmarks = expert_result.pose_landmarks[0]
-
-                        # Hand 감지 및 그리기
-                        expert_hand_result = expert_hand_landmarker.detect_for_video(expert_mp_image, expert_timestamp_ms)
-                        if expert_hand_result.hand_landmarks:
-                            expert_frame_rgb = draw_hands_on_image(expert_frame_rgb, expert_hand_result)
-
-                        # 전문가 영상 표시
-                        expert_video_placeholder.image(expert_frame_rgb, channels="RGB", use_container_width=True)
-
-                        # 타임스탬프 증가 (절대 감소하지 않음)
-                        expert_timestamp_ms += int(1000 / expert_fps)
-
-                # 2. 사용자 웹캠 프레임 읽기
-                ret_user, user_frame = cap.read()
-
-                if not ret_user:
-                    st.error("❌ 웹캠에서 영상을 읽을 수 없습니다.")
+    feedback_placeholder = st.empty()
+    
+    if webrtc_ctx.state.playing:
+        feedback_placeholder.info("웹캠을 향해 자세를 취하면 실시간 피드백이 표시됩니다.")
+        while webrtc_ctx.state.playing:
+            try:
+                result = result_queue.get(timeout=1.0)
+                st.session_state.comparison_score = result['overall_score']
+                
+                score_color = "🟢" if result["overall_score"] >= 80 else "🟡" if result["overall_score"] >= 60 else "🔴"
+                feedback_text = f"**{score_color} {result['overall_score']:.0f}점, 카메라에 감지된 관절: {result['joint_coverage_percent']}%**\n\n"
+                feedback_text += "\n\n".join(result['feedback'])
+                feedback_placeholder.markdown(feedback_text)
+                
+                if result['overall_score'] >= 80:
+                    if st.session_state.current_action not in st.session_state.completed_actions:
+                        st.session_state.completed_actions.append(st.session_state.current_action)
+                    st.success(f"✅ {action['name']} 동작을 완료했습니다!")
+                    st.balloons()
+                    time.sleep(2)
+                    st.session_state.current_action += 1
+                    webrtc_ctx.video_processor_factory = None
+                    st.rerun()
                     break
 
-                # BGR을 RGB로 변환
-                user_frame_rgb = cv2.cvtColor(user_frame, cv2.COLOR_BGR2RGB)
-
-                # 좌우 반전 (거울 효과)
-                user_frame_rgb = cv2.flip(user_frame_rgb, 1)
-
-                # MediaPipe Image로 변환
-                user_mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=user_frame_rgb)
-
-                # Pose 감지 (매 프레임)
-                user_result = user_pose_landmarker.detect_for_video(user_mp_image, user_timestamp_ms)
-
-                # 랜드마크 그리기
-                if user_result.pose_landmarks:
-                    user_frame_rgb = draw_landmarks_on_image(user_frame_rgb, user_result)
-                    user_landmarks = user_result.pose_landmarks[0]
-
-                    # 자세 비교 (1초마다 한번)
-                    if user_frame_count - last_comparison_frame >= comparison_interval:
-                        if expert_landmarks:
-                            comparison_result = compare_poses(user_landmarks, expert_landmarks)
-                            st.session_state.comparison_score = comparison_result['overall_score']
-                            st.session_state.comparison_feedback = comparison_result['feedback']
-                            st.session_state.joint_coverage_percent = comparison_result['joint_coverage_percent']
-                            last_comparison_frame = user_frame_count
-                else:
-                    # 자세 미감지
-                    cv2.putText(user_frame_rgb, 'Pose: Not Detected', (10, 30),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
-
-                # Hand 감지 및 그리기
-                user_hand_result = user_hand_landmarker.detect_for_video(user_mp_image, user_timestamp_ms)
-                if user_hand_result.hand_landmarks:
-                    user_frame_rgb = draw_hands_on_image(user_frame_rgb, user_hand_result)
-
-                # 사용자 웹캠 표시
-                user_video_placeholder.image(user_frame_rgb, channels="RGB", use_container_width=True)
-
-                # 피드백 표시 (전문가 시범 밑에)
-                if st.session_state.comparison_score > 0:
-                    score_color = "🟢" if st.session_state.comparison_score >= 80 else "🟡" if st.session_state.comparison_score >= 60 else "🔴"
-
-                    # 점수와 감지율을 같은 줄에 표시
-                    coverage_percent = st.session_state.get('joint_coverage_percent', 100)
-                    feedback_text = f"**{score_color} {st.session_state.comparison_score:.0f}점, 카메라에 감지된 관절: {coverage_percent}%**\n\n"
-
-                    if st.session_state.comparison_feedback:
-                        # 각 피드백 항목 사이에 줄바꿈 추가
-                        for fb in st.session_state.comparison_feedback:
-                            feedback_text += f"{fb}\n\n"
-                    else:
-                        feedback_text += "🟢 완벽합니다!"
-
-                    feedback_placeholder.markdown(feedback_text)
-                elif user_result.pose_landmarks and expert_landmarks:
-                    feedback_placeholder.info("분석 중...")
-                else:
-                    feedback_placeholder.info("전신이 보이도록 자세를 취해주세요")
-
-                # 타임스탬프 증가
-                user_timestamp_ms += int(1000 / 30)
-                user_frame_count += 1
-
-                # CPU 사용량 감소
-                time.sleep(0.01)
-
-        except Exception as e:
-            st.error(f"❌ 오류 발생: {str(e)}")
-        finally:
-            cap.release()
-            if expert_cap:
-                expert_cap.release()
-            expert_pose_landmarker.close()
-            user_pose_landmarker.close()
-            expert_hand_landmarker.close()
-            user_hand_landmarker.close()
-            st.session_state.action_webcam_running = False
+            except Exception:
+                pass
     else:
-        # 웹캠 중지 상태일 때
-        if os.path.exists(video_path):
-            expert_video_placeholder.video(video_path)
-        else:
-            expert_video_placeholder.info(f"{action['name']} 시범 영상 - 업로드 예정")
+        feedback_placeholder.empty()
 
-        user_video_placeholder.info(t('webcam_guide'))
-        feedback_placeholder.info("웹캠을 시작하고 자세를 취하면 즉시 피드백이 표시됩니다")
-
-    # 완료 조건 체크 (점수 80점 이상)
-    if st.session_state.comparison_score >= 80:
-        if st.session_state.current_action not in st.session_state.completed_actions:
-            st.session_state.completed_actions.append(st.session_state.current_action)
-            st.success(f"✅ {action['name']} 동작을 완료했습니다!")
-            st.balloons()
-    
-    # 세부 영상 표시
-    if 'detail_videos' in action:
-        render_detail_videos(action['detail_videos'], video_path)
-    
-    # 수동 진행 버튼 (테스트용)
+    # Manual completion and badge check
     if st.button(t('action_complete_manual'), help=t('ai_judgement')):
         if st.session_state.current_action not in st.session_state.completed_actions:
             st.session_state.completed_actions.append(st.session_state.current_action)
-        
         st.session_state.current_action += 1
-        if st.session_state.current_action >= len(basic_actions):
-            st.session_state.current_step = 'meme'
         st.rerun()
-    
-    # 배지 체크
+
     completed_count = len(st.session_state.completed_actions)
     badge_system = get_badge_system(st.session_state.language)
     if completed_count in badge_system and completed_count not in st.session_state.badges:
@@ -4389,11 +4141,11 @@ def show_dna_gallery_page():
     st.markdown("---")
     col1, col2 = st.columns(2)
     with col1:
-        if st.button(t('landing_start'), type="primary", use_container_width=True):
+        if st.button(t('landing_start'), type="primary", width='stretch'):
             st.session_state.current_step = 'test'
             st.rerun()
     with col2:
-        if st.button(t('see_story'), use_container_width=True):
+        if st.button(t('see_story'), width='stretch'):
             st.session_state.current_step = 'story'
             st.rerun()
 
@@ -4760,7 +4512,7 @@ def show_expert_login_page():
         
         col_btn1, col_btn2 = st.columns(2)
         with col_btn1:
-            if st.button(t('expert_login'), type="primary", use_container_width=True):
+            if st.button(t('expert_login'), type="primary", width='stretch'):
                 experts = get_experts()
                 for expert_id, expert_data in experts.items():
                     if expert_data.get('email') == email and expert_data.get('password') == password:
@@ -4773,7 +4525,7 @@ def show_expert_login_page():
                 st.error("이메일 또는 비밀번호가 올바르지 않습니다.")
         
         with col_btn2:
-            if st.button("뒤로가기", use_container_width=True):
+            if st.button("뒤로가기", width='stretch'):
                 st.session_state.current_step = 'landing'
                 st.rerun()
         
@@ -4797,7 +4549,7 @@ def show_expert_signup_page():
         
         col_btn1, col_btn2 = st.columns(2)
         with col_btn1:
-            if st.button("가입하기", type="primary", use_container_width=True):
+            if st.button("가입하기", type="primary", width='stretch'):
                 if name and email and password:
                     experts = get_experts()
                     # 이메일 중복 확인
@@ -4824,7 +4576,7 @@ def show_expert_signup_page():
                     st.error("필수 항목을 모두 입력해주세요.")
         
         with col_btn2:
-            if st.button("뒤로가기", use_container_width=True):
+            if st.button("뒤로가기", width='stretch'):
                 st.session_state.current_step = 'landing'
                 st.rerun()
 
@@ -4849,7 +4601,7 @@ def show_expert_upload_page():
         tags = st.text_input(t('video_tags'))
         video_file = st.file_uploader("영상 파일 업로드", type=['mp4', 'mov', 'avi'])
         
-        if st.button("업로드", type="primary", use_container_width=True):
+        if st.button("업로드", type="primary", width='stretch'):
             if title and video_file:
                 # 영상 저장
                 video_id = f"video_{int(time.time())}"
@@ -4880,7 +4632,7 @@ def show_expert_upload_page():
             else:
                 st.error("제목과 영상 파일을 모두 입력해주세요.")
         
-        if st.button("뒤로가기", use_container_width=True):
+        if st.button("뒤로가기", width='stretch'):
             st.session_state.current_step = 'expert_profile'
             st.rerun()
 
@@ -5127,7 +4879,7 @@ def show_video_detail_page():
         
         # 좋아요 버튼
         like_key = f"like_{st.session_state.viewing_video_id}"
-        if st.button(f"❤️ {t('like')}", key=like_key, use_container_width=True):
+        if st.button(f"❤️ {t('like')}", key=like_key, width='stretch'):
             feedback_id = f"feedback_{int(time.time())}"
             feedback_data = {
                 'id': feedback_id,
@@ -5141,7 +4893,7 @@ def show_video_detail_page():
         
         # 평점
         rating = st.slider(t('rating'), 1, 5, 3)
-        if st.button("평점 등록", use_container_width=True):
+        if st.button("평점 등록", width='stretch'):
             feedback_id = f"feedback_{int(time.time())}"
             feedback_data = {
                 'id': feedback_id,
@@ -5207,7 +4959,7 @@ def show_org_login_page():
         
         col_btn1, col_btn2 = st.columns(2)
         with col_btn1:
-            if st.button(t('org_login'), type="primary", use_container_width=True):
+            if st.button(t('org_login'), type="primary", width='stretch'):
                 orgs = get_organizations()
                 for org_id, org_data in orgs.items():
                     if org_data.get('email') == email and org_data.get('password') == password:
@@ -5221,7 +4973,7 @@ def show_org_login_page():
                 st.error("이메일 또는 비밀번호가 올바르지 않습니다.")
         
         with col_btn2:
-            if st.button("뒤로가기", use_container_width=True):
+            if st.button("뒤로가기", width='stretch'):
                 st.session_state.current_step = 'landing'
                 st.rerun()
         
@@ -5255,7 +5007,7 @@ def show_org_signup_page():
         
         col_btn1, col_btn2 = st.columns(2)
         with col_btn1:
-            if st.button("가입하기", type="primary", use_container_width=True):
+            if st.button("가입하기", type="primary", width='stretch'):
                 if name and email and password:
                     orgs = get_organizations()
                     if any(o.get('email') == email for o in orgs.values()):
@@ -5296,7 +5048,7 @@ def show_org_signup_page():
                     st.error("필수 항목을 모두 입력해주세요.")
         
         with col_btn2:
-            if st.button("뒤로가기", use_container_width=True):
+            if st.button("뒤로가기", width='stretch'):
                 st.session_state.current_step = 'landing'
                 st.rerun()
 
@@ -5345,19 +5097,19 @@ def show_org_dashboard_page():
     st.markdown("### 빠른 액션")
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        if st.button(t('subscription_management'), use_container_width=True):
+        if st.button(t('subscription_management'), width='stretch'):
             st.session_state.current_step = 'subscription_management'
             st.rerun()
     with col2:
-        if st.button(t('instructor_management'), use_container_width=True):
+        if st.button(t('instructor_management'), width='stretch'):
             st.session_state.current_step = 'instructor_management'
             st.rerun()
     with col3:
-        if st.button(t('student_management'), use_container_width=True):
+        if st.button(t('student_management'), width='stretch'):
             st.session_state.current_step = 'student_management'
             st.rerun()
     with col4:
-        if st.button(t('custom_actions'), use_container_width=True):
+        if st.button(t('custom_actions'), width='stretch'):
             st.session_state.current_step = 'custom_actions_setup'
             st.rerun()
     
@@ -5369,7 +5121,7 @@ def show_org_dashboard_page():
             '학생명': s.get('name', ''),
             '강사': next((i.get('name', '') for i in org_instructors if i.get('id') == s.get('instructor_id')), ''),
             '상태': '활성'
-        } for s in org_students[:10]]), use_container_width=True)
+        } for s in org_students[:10]]), width='stretch')
     else:
         st.info("등록된 학생이 없습니다.")
 
@@ -5829,13 +5581,13 @@ def show_pose_test_page():
         if pose_count > 0 or hand_count > 0:
             st.info(f"📊 Pose: {pose_count}개 | Hands: {hand_count}개")
             csv_data = convert_landmarks_to_csv(st.session_state.pose_landmarks_data, st.session_state.hand_landmarks_data)
-            st.download_button("📥 CSV 다운로드", csv_data, f"landmarks_{int(time.time())}.csv", "text/csv", use_container_width=True)
+            st.download_button("📥 CSV 다운로드", csv_data, f"landmarks_{int(time.time())}.csv", "text/csv", width='stretch')
             
             combined_data = {'pose_landmarks': st.session_state.pose_landmarks_data, 'hand_landmarks': st.session_state.hand_landmarks_data}
             json_data = json.dumps(combined_data, indent=2)
-            st.download_button("📥 JSON 다운로드", json_data, f"landmarks_{int(time.time())}.json", "application/json", use_container_width=True)
+            st.download_button("📥 JSON 다운로드", json_data, f"landmarks_{int(time.time())}.json", "application/json", width='stretch')
 
-            if st.button("🗑️ 데이터 초기화", use_container_width=True):
+            if st.button("🗑️ 데이터 초기화", width='stretch'):
                 st.session_state.pose_landmarks_data = []
                 st.session_state.hand_landmarks_data = []
                 st.rerun()
