@@ -3018,26 +3018,35 @@ def create_meme_gif(dna_type_name, dna_data, duration=3, fps=10, style='gradient
 def main():
     init_session_state()
     
-    # 사이드바에 언어 선택 추가
+    # 재구성된 사이드바
     with st.sidebar:
-        st.markdown("### 🌐 Language / 언어")
-        lang_option = st.selectbox(
-            "",
-            ["🇰🇷 한국어", "🇺🇸 English"],
-            index=0 if st.session_state.language == 'ko' else 1,
-            key='lang_selector'
-        )
-        
-        # 언어 변경 감지
-        new_lang = 'ko' if '한국어' in lang_option else 'en'
-        if new_lang != st.session_state.language:
-            st.session_state.language = new_lang
+        # 최상단: 홈 버튼
+        if st.button("🏠 홈으로", type="primary", use_container_width=True):
+            st.session_state.current_step = 'landing'
             st.rerun()
-        
-        # DNA 갤러리 메뉴
+
         st.markdown("---")
+
+        # 내 K-DNA 깨우기 (테스트 시작)
+        if st.button("✨ 내 K-DNA 깨우기", use_container_width=True):
+            st.session_state.current_step = 'test'
+            st.rerun()
+
+        # DNA 갤러리 메뉴
         if st.button(t('explore_all_dna'), use_container_width=True):
             st.session_state.current_step = 'dna_gallery'
+            st.rerun()
+
+        st.markdown("---")
+
+        # 움직임 여정 시작 메뉴
+        if st.button(f"💃 {t('movement_journey')}", use_container_width=True):
+            st.session_state.current_step = 'action_select'
+            st.rerun()
+
+        # 5000년 움직임의 비밀 버튼
+        if st.button("📜 5000년 움직임의 비밀", use_container_width=True):
+            st.session_state.current_step = 'story'
             st.rerun()
 
         # 동작 테스트 메뉴
@@ -3050,7 +3059,7 @@ def main():
         # 전문가 시스템 메뉴
         st.markdown("---")
         st.markdown(f"### 🎭 {t('expert_system')}")
-        
+
         if st.session_state.expert_logged_in:
             expert = get_experts().get(st.session_state.expert_id, {})
             st.markdown(f"**{expert.get('name', '전문가')}** 님")
@@ -3071,18 +3080,18 @@ def main():
             if st.button(t('expert_signup'), use_container_width=True):
                 st.session_state.current_step = 'expert_signup'
                 st.rerun()
-        
+
         if st.button(t('expert_gallery'), use_container_width=True):
             st.session_state.current_step = 'expert_gallery'
             st.rerun()
         if st.button(t('expert_ranking'), use_container_width=True):
             st.session_state.current_step = 'expert_ranking'
             st.rerun()
-        
+
         # B2B 시스템 메뉴
         st.markdown("---")
         st.markdown(f"### 🏢 {t('b2b_system')}")
-        
+
         if st.session_state.org_logged_in:
             org = get_organizations().get(st.session_state.org_id, {})
             st.markdown(f"**{org.get('name', '단체')}**")
@@ -3113,6 +3122,23 @@ def main():
             if st.button(t('org_signup'), use_container_width=True):
                 st.session_state.current_step = 'org_signup'
                 st.rerun()
+
+        # 언어 설정 (최하단)
+        st.markdown("---")
+        st.markdown("### 🌐 Language / 언어")
+        lang_option = st.selectbox(
+            "Language / 언어",
+            ["🇰🇷 한국어", "🇺🇸 English"],
+            index=0 if st.session_state.language == 'ko' else 1,
+            key='lang_selector',
+            label_visibility="collapsed"
+        )
+
+        # 언어 변경 감지
+        new_lang = 'ko' if '한국어' in lang_option else 'en'
+        if new_lang != st.session_state.language:
+            st.session_state.language = new_lang
+            st.rerun()
     
     # 헤더
     st.markdown(f"""
