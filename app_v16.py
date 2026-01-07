@@ -3661,15 +3661,6 @@ def show_action_page():
 
         # 웹캠 초기화
         cap = cv2.VideoCapture(0)
-
-        # 디버깅: 카메라 상태 확인
-        st.write(f"🔍 디버그: cap.isOpened() = {cap.isOpened()}")
-
-        if not cap.isOpened():
-            user_video_placeholder.error("❌ 카메라를 열 수 없습니다 (isOpened=False)")
-            st.session_state.action_webcam_running = False
-            st.stop()
-
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 

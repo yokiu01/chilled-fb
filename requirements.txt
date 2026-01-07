@@ -19,9 +19,3 @@ Pillow>=10.0.0
 
 # 구글 시트 연동 (기존 기능용)
 st-gsheets-connection>=0.0.3
-
-# WebRTC (모바일 카메라 지원용 - 사용자 카메라만 WebRTC 사용)
-# 전문가 영상은 OpenCV로 처리, 사용자 카메라만 WebRTC 사용 (하이브리드)
-# 상세 내역: ISSUES_LOG.md [7] 참조
-streamlit-webrtc>=0.45.0
-av>=10.0.0
