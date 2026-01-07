@@ -25,7 +25,8 @@
       "Bash(python app_v18.py:*)",
       "Bash(git pull:*)",
       "Bash(git rebase:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(timeout 10 streamlit run:*)"
     ]
   }
 }
