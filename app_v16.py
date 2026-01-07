@@ -3638,7 +3638,7 @@ def show_action_page():
     # 영상 파일 경로
     video_path = f"videos/{action['video_file']}"
     video_filename = action['video_file']
-    video_name = os.path.splitext(video_filename)[0]
+    video_name = os.path.splitext(os.path.basename(video_filename))[0]
 
     # 전문가 랜드마크 JSON 경로
     landmarks_json_path = f"data/expert_landmarks/{video_name}_landmarks.json"
