@@ -3680,8 +3680,8 @@ def show_action_page():
             img = cv2.flip(img, 1)
 
             try:
-                state = get_webrtc_state('action_page')
-                timestamp_ms = state.get('timestamp_ms', 0)
+                import time
+                timestamp_ms = int(time.time() * 1000)
 
                 user_mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img)
                 user_result = user_pose_landmarker.detect_for_video(user_mp_image, timestamp_ms)
@@ -3702,17 +3702,16 @@ def show_action_page():
                                 'feedback_messages': comparison_result['feedback'],
                                 'joint_coverage': comparison_result.get('joint_coverage_percent', 100),
                                 'pose_detected': True,
-                                'timestamp_ms': timestamp_ms + 33,
-                            })
+                                                            })
                         except Exception as e:
                             cv2.putText(img, f'Err: {str(e)[:30]}', (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
-                            update_webrtc_state('action_page', {'pose_detected': True, 'timestamp_ms': timestamp_ms + 33})
+                            update_webrtc_state('action_page', {'pose_detected': True, })
                     else:
                         cv2.putText(img, 'Pose OK (no expert)', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                        update_webrtc_state('action_page', {'pose_detected': True, 'timestamp_ms': timestamp_ms + 33})
+                        update_webrtc_state('action_page', {'pose_detected': True, })
                 else:
                     cv2.putText(img, 'No pose detected', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 165, 0), 2)
-                    update_webrtc_state('action_page', {'pose_detected': False, 'feedback_score': 0, 'timestamp_ms': timestamp_ms + 33})
+                    update_webrtc_state('action_page', {'pose_detected': False, 'feedback_score': 0, })
 
                 hand_result = user_hand_landmarker.detect_for_video(user_mp_image, timestamp_ms)
                 if hand_result.hand_landmarks:
@@ -5919,8 +5918,8 @@ def show_pose_test_page():
             img = cv2.flip(img, 1)
 
             try:
-                state = get_webrtc_state('pose_test_page')
-                timestamp_ms = state.get('timestamp_ms', 0)
+                import time
+                timestamp_ms = int(time.time() * 1000)
 
                 mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img)
                 pose_result = pose_landmarker.detect_for_video(mp_image, timestamp_ms)
@@ -5939,15 +5938,14 @@ def show_pose_test_page():
                                 'feedback_messages': comparison_result['feedback'],
                                 'joint_coverage': comparison_result.get('joint_coverage_percent', 100),
                                 'pose_detected': True,
-                                'timestamp_ms': timestamp_ms + 33,
-                            })
+                                                            })
                         except Exception as e:
-                            update_webrtc_state('pose_test_page', {'pose_detected': True, 'timestamp_ms': timestamp_ms + 33})
+                            update_webrtc_state('pose_test_page', {'pose_detected': True, })
                     else:
                         cv2.putText(img, 'Pose: OK', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-                        update_webrtc_state('pose_test_page', {'pose_detected': True, 'timestamp_ms': timestamp_ms + 33})
+                        update_webrtc_state('pose_test_page', {'pose_detected': True, })
                 else:
-                    update_webrtc_state('pose_test_page', {'pose_detected': False, 'feedback_score': 0, 'timestamp_ms': timestamp_ms + 33})
+                    update_webrtc_state('pose_test_page', {'pose_detected': False, 'feedback_score': 0, })
 
                 if enable_hands and hand_landmarker:
                     hand_result = hand_landmarker.detect_for_video(mp_image, timestamp_ms)
