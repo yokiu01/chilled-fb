@@ -2099,6 +2099,13 @@ def init_mediapipe():
 
 # ==================== 자세 비교 유틸리티 ====================
 
+def get_landmark_value(lm, key):
+    """랜드마크에서 값을 가져옴 (dict 또는 객체 모두 지원)"""
+    if isinstance(lm, dict):
+        return lm.get(key, 0)
+    else:
+        return getattr(lm, key, 0)
+
 def normalize_landmarks(landmarks):
     """
     좌표계 독립적 비교를 위한 랜드마크 정규화
@@ -2114,17 +2121,17 @@ def normalize_landmarks(landmarks):
     # 골반 중심점 계산 (landmark 23, 24)
     hip_left = landmarks[23]
     hip_right = landmarks[24]
-    hip_center_x = (hip_left.x + hip_right.x) / 2
-    hip_center_y = (hip_left.y + hip_right.y) / 2
-    hip_center_z = (hip_left.z + hip_right.z) / 2
+    hip_center_x = (get_landmark_value(hip_left, 'x') + get_landmark_value(hip_right, 'x')) / 2
+    hip_center_y = (get_landmark_value(hip_left, 'y') + get_landmark_value(hip_right, 'y')) / 2
+    hip_center_z = (get_landmark_value(hip_left, 'z') + get_landmark_value(hip_right, 'z')) / 2
 
     # 어깨 너비 계산 (landmark 11, 12)
     shoulder_left = landmarks[11]
     shoulder_right = landmarks[12]
     shoulder_width = np.sqrt(
-        (shoulder_right.x - shoulder_left.x)**2 +
-        (shoulder_right.y - shoulder_left.y)**2 +
-        (shoulder_right.z - shoulder_left.z)**2
+        (get_landmark_value(shoulder_right, 'x') - get_landmark_value(shoulder_left, 'x'))**2 +
+        (get_landmark_value(shoulder_right, 'y') - get_landmark_value(shoulder_left, 'y'))**2 +
+        (get_landmark_value(shoulder_right, 'z') - get_landmark_value(shoulder_left, 'z'))**2
     )
 
     if shoulder_width == 0:
@@ -2133,11 +2140,15 @@ def normalize_landmarks(landmarks):
     # 정규화된 랜드마크 생성
     normalized = []
     for lm in landmarks:
+        lm_x = get_landmark_value(lm, 'x')
+        lm_y = get_landmark_value(lm, 'y')
+        lm_z = get_landmark_value(lm, 'z')
+        lm_vis = get_landmark_value(lm, 'visibility') if (isinstance(lm, dict) or hasattr(lm, 'visibility')) else 1.0
         normalized.append({
-            'x': (lm.x - hip_center_x) / shoulder_width,
-            'y': (lm.y - hip_center_y) / shoulder_width,
-            'z': (lm.z - hip_center_z) / shoulder_width,
-            'visibility': lm.visibility if hasattr(lm, 'visibility') else 1.0
+            'x': (lm_x - hip_center_x) / shoulder_width,
+            'y': (lm_y - hip_center_y) / shoulder_width,
+            'z': (lm_z - hip_center_z) / shoulder_width,
+            'visibility': lm_vis if lm_vis else 1.0
         })
 
     return normalized
@@ -3688,8 +3699,6 @@ def show_action_page():
 
                 if user_result.pose_landmarks:
                     img = draw_landmarks_on_image(img, user_result)
-                    num_lm = len(user_result.pose_landmarks[0]) if user_result.pose_landmarks else 0
-                    cv2.putText(img, f'Landmarks: {num_lm}', (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
 
                     if expert_reference_landmarks:
                         try:
@@ -3704,7 +3713,7 @@ def show_action_page():
                                 'pose_detected': True,
                                                             })
                         except Exception as e:
-                            cv2.putText(img, f'Err: {str(e)[:30]}', (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+                            print(f"[compare_poses error] {e}")
                             update_webrtc_state('action_page', {'pose_detected': True, })
                     else:
                         cv2.putText(img, 'Pose OK (no expert)', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)

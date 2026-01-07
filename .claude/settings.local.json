@@ -26,7 +26,10 @@
       "Bash(git pull:*)",
       "Bash(git rebase:*)",
       "Bash(git add:*)",
-      "Bash(timeout 10 streamlit run:*)"
+      "Bash(timeout 10 streamlit run:*)",
+      "Bash(cat:*)",
+      "Bash(python3:*)",
+      "Bash(git checkout:*)"
     ]
   }
 }
