@@ -33,6 +33,94 @@ import pandas as pd
 from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
 import av
 from streamlit_autorefresh import st_autorefresh
+import threading
+
+# =============================================================================
+# WebRTC 공유 상태 (모듈 레벨 - 리렌더링 간 유지)
+# WebRTC 콜백은 별도 스레드에서 실행되어 session_state 접근 불가
+# 따라서 모듈 레벨 딕셔너리 + threading.Lock 사용
+# =============================================================================
+_webrtc_state_lock = threading.Lock()
+_webrtc_shared_state = {
+    'action_page': {
+        'timestamp_ms': 0,
+        'feedback_score': 0,
+        'feedback_messages': [],
+        'joint_coverage': 0,
+        'pose_detected': False,
+    },
+    'pose_test_page': {
+        'timestamp_ms': 0,
+        'feedback_score': 0,
+        'feedback_messages': [],
+        'joint_coverage': 0,
+        'pose_detected': False,
+        'hands_detected': 0,
+    }
+}
+
+def get_webrtc_state(page_key: str) -> dict:
+    """WebRTC 공유 상태 읽기 (thread-safe)"""
+    with _webrtc_state_lock:
+        return _webrtc_shared_state.get(page_key, {}).copy()
+
+def update_webrtc_state(page_key: str, updates: dict):
+    """WebRTC 공유 상태 업데이트 (thread-safe)"""
+    with _webrtc_state_lock:
+        if page_key in _webrtc_shared_state:
+            _webrtc_shared_state[page_key].update(updates)
+
+def reset_webrtc_state(page_key: str):
+    """WebRTC 공유 상태 초기화 (thread-safe)"""
+    with _webrtc_state_lock:
+        if page_key == 'action_page':
+            _webrtc_shared_state[page_key] = {
+                'timestamp_ms': 0,
+                'feedback_score': 0,
+                'feedback_messages': [],
+                'joint_coverage': 0,
+                'pose_detected': False,
+            }
+        elif page_key == 'pose_test_page':
+            _webrtc_shared_state[page_key] = {
+                'timestamp_ms': 0,
+                'feedback_score': 0,
+                'feedback_messages': [],
+                'joint_coverage': 0,
+                'pose_detected': False,
+                'hands_detected': 0,
+            }
+
+# =============================================================================
+# MediaPipe 캐싱 (메모리 누수 방지)
+# @st.cache_resource로 앱 전체에서 단일 인스턴스 사용
+# =============================================================================
+@st.cache_resource
+def get_pose_landmarker(detection_conf: float = 0.5, tracking_conf: float = 0.5):
+    """캐시된 PoseLandmarker 반환"""
+    pose_model_path = os.path.join(os.path.dirname(__file__), "models", "pose_landmarker_lite.task")
+    pose_base_options = python.BaseOptions(model_asset_path=pose_model_path)
+    pose_options = vision.PoseLandmarkerOptions(
+        base_options=pose_base_options,
+        running_mode=vision.RunningMode.VIDEO,
+        min_pose_detection_confidence=detection_conf,
+        min_tracking_confidence=tracking_conf
+    )
+    return vision.PoseLandmarker.create_from_options(pose_options)
+
+@st.cache_resource
+def get_hand_landmarker(detection_conf: float = 0.5, tracking_conf: float = 0.5):
+    """캐시된 HandLandmarker 반환"""
+    hand_model_path = os.path.join(os.path.dirname(__file__), "models", "hand_landmarker.task")
+    hand_base_options = python.BaseOptions(model_asset_path=hand_model_path)
+    hand_options = vision.HandLandmarkerOptions(
+        base_options=hand_base_options,
+        running_mode=vision.RunningMode.VIDEO,
+        num_hands=2,
+        min_hand_detection_confidence=detection_conf,
+        min_tracking_confidence=tracking_conf
+    )
+    return vision.HandLandmarker.create_from_options(hand_options)
 
 # ==================== 페이지 설정 ====================
 st.set_page_config(page_title="춤마루 (Choomaru)", page_icon="💃", layout="wide")
@@ -3550,6 +3638,7 @@ def show_action_page():
     col1, col2, col3 = st.columns([1, 4, 1])
     with col1:
         if st.button(t('btn_prev')):
+            reset_webrtc_state('action_page')
             if st.session_state.current_action > 0:
                 st.session_state.current_action -= 1
             else:
@@ -3562,6 +3651,7 @@ def show_action_page():
 
     with col3:
         if st.button(t('btn_home')):
+            reset_webrtc_state('action_page')
             st.session_state.current_step = 'landing'
             st.rerun()
 
@@ -3579,10 +3669,6 @@ def show_action_page():
         st.session_state.action_webcam_running = False
     if 'comparison_score' not in st.session_state:
         st.session_state.comparison_score = 0
-    if 'comparison_feedback' not in st.session_state:
-        st.session_state.comparison_feedback = []
-    if 'joint_coverage_percent' not in st.session_state:
-        st.session_state.joint_coverage_percent = 0
 
     # 영상 파일 경로
     video_path = f"videos/{action['video_file']}"
@@ -3593,19 +3679,17 @@ def show_action_page():
     landmarks_json_path = f"data/expert_landmarks/{video_name}_landmarks.json"
     processed_video_path = f"videos/processed/skeleton_{video_filename}"
 
-    # 전문가 랜드마크 로드 (미리 처리된 경우)
+    # 전문가 랜드마크 로드
     expert_reference_landmarks = None
     if os.path.exists(landmarks_json_path):
         expert_reference_landmarks = load_expert_landmarks(landmarks_json_path)
-        if expert_reference_landmarks:
-            st.success(f"✅ 전문가 자세 데이터 로드 완료 - 실시간 비교 가능")
 
     # 2열 레이아웃: 전문가 | 사용자
     col1, col2 = st.columns(2)
 
     with col1:
         st.markdown(f"#### {t('expert_demo')}")
-        # 전문가 영상 표시 (스켈레톤 처리된 영상 또는 원본)
+        # 전문가 영상 표시
         if os.path.exists(processed_video_path):
             st.video(processed_video_path, loop=True, autoplay=True, muted=True)
         elif os.path.exists(video_path):
@@ -3618,67 +3702,30 @@ def show_action_page():
 
     with col2:
         st.markdown(f"#### {t('your_movement')}")
-        st.info("👆 아래 'START' 버튼을 눌러 카메라를 시작하세요")
 
         # =============================================================================
-        # MediaPipe 초기화 (WebRTC 콜백 외부에서 생성)
-        # WebRTC 콜백은 별도 스레드에서 실행되어 st.session_state 접근 불가
-        # 해결: 콜백 외부에서 생성 후 클로저로 전달
+        # 캐시된 MediaPipe 사용 (메모리 누수 방지)
         # =============================================================================
-        pose_model_path = os.path.join(os.path.dirname(__file__), "models", "pose_landmarker_lite.task")
-        pose_base_options = python.BaseOptions(model_asset_path=pose_model_path)
-        pose_options = vision.PoseLandmarkerOptions(
-            base_options=pose_base_options,
-            running_mode=vision.RunningMode.VIDEO,
-            min_pose_detection_confidence=0.5,
-            min_tracking_confidence=0.5
-        )
-        user_pose_landmarker = vision.PoseLandmarker.create_from_options(pose_options)
-
-        hand_model_path = os.path.join(os.path.dirname(__file__), "models", "hand_landmarker.task")
-        hand_base_options = python.BaseOptions(model_asset_path=hand_model_path)
-        hand_options = vision.HandLandmarkerOptions(
-            base_options=hand_base_options,
-            running_mode=vision.RunningMode.VIDEO,
-            num_hands=2,
-            min_hand_detection_confidence=0.5,
-            min_tracking_confidence=0.5
-        )
-        user_hand_landmarker = vision.HandLandmarker.create_from_options(hand_options)
-
-        # 상태 공유용 딕셔너리 (session_state 대신 사용)
-        user_state = {
-            'timestamp_ms': 0,
-            'latest_landmarks': None,
-            'feedback_score': 0,
-            'feedback_messages': [],
-            'joint_coverage': 0,
-        }
+        user_pose_landmarker = get_pose_landmarker(0.5, 0.5)
+        user_hand_landmarker = get_hand_landmarker(0.5, 0.5)
 
         # WebRTC 비디오 프레임 콜백 함수
         def video_frame_callback(frame: av.VideoFrame) -> av.VideoFrame:
-            """
-            사용자 카메라 프레임 처리 (WebRTC)
-            - MediaPipe 객체는 클로저로 전달받음
-            - 결과는 user_state에 저장 (session_state 접근 불가)
-            """
+            """사용자 카메라 프레임 처리"""
             img = frame.to_ndarray(format="rgb24")
-            img = cv2.flip(img, 1)  # 좌우 반전 (거울 효과)
+            img = cv2.flip(img, 1)
 
             try:
-                # MediaPipe Image로 변환
+                # 현재 상태 가져오기
+                state = get_webrtc_state('action_page')
+                timestamp_ms = state.get('timestamp_ms', 0)
+
+                # MediaPipe 처리
                 user_mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img)
+                user_result = user_pose_landmarker.detect_for_video(user_mp_image, timestamp_ms)
 
-                # Pose 감지
-                user_result = user_pose_landmarker.detect_for_video(
-                    user_mp_image,
-                    user_state['timestamp_ms']
-                )
-
-                # Pose 랜드마크 그리기
                 if user_result.pose_landmarks:
                     img = draw_landmarks_on_image(img, user_result)
-                    user_state['latest_landmarks'] = user_result.pose_landmarks[0]
 
                     # 전문가 자세와 비교
                     if expert_reference_landmarks:
@@ -3687,39 +3734,54 @@ def show_action_page():
                                 user_result.pose_landmarks[0],
                                 expert_reference_landmarks
                             )
-                            user_state['feedback_score'] = comparison_result['overall_score']
-                            user_state['feedback_messages'] = comparison_result['feedback']
-                            user_state['joint_coverage'] = comparison_result.get('joint_coverage_percent', 100)
+                            score = comparison_result['overall_score']
+
+                            # 점수 화면에 표시
+                            color = (0, 255, 0) if score >= 80 else (255, 165, 0) if score >= 60 else (255, 0, 0)
+                            cv2.putText(img, f'Score: {score}%', (10, 30),
+                                       cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+
+                            # 공유 상태 업데이트
+                            update_webrtc_state('action_page', {
+                                'feedback_score': score,
+                                'feedback_messages': comparison_result['feedback'],
+                                'joint_coverage': comparison_result.get('joint_coverage_percent', 100),
+                                'pose_detected': True,
+                                'timestamp_ms': timestamp_ms + 33,
+                            })
                         except Exception as e:
                             print(f"[ERROR] 자세 비교 실패: {e}")
+                            update_webrtc_state('action_page', {
+                                'pose_detected': True,
+                                'timestamp_ms': timestamp_ms + 33,
+                            })
+                    else:
+                        cv2.putText(img, 'Pose: OK', (10, 30),
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+                        update_webrtc_state('action_page', {
+                            'pose_detected': True,
+                            'timestamp_ms': timestamp_ms + 33,
+                        })
                 else:
-                    cv2.putText(img, 'Pose: Not Detected', (10, 30),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
-                    user_state['latest_landmarks'] = None
-                    user_state['feedback_score'] = 0
-                    user_state['feedback_messages'] = []
+                    update_webrtc_state('action_page', {
+                        'pose_detected': False,
+                        'feedback_score': 0,
+                        'timestamp_ms': timestamp_ms + 33,
+                    })
 
-                # Hand 감지 및 그리기
-                hand_result = user_hand_landmarker.detect_for_video(
-                    user_mp_image,
-                    user_state['timestamp_ms']
-                )
+                # Hand 감지
+                hand_result = user_hand_landmarker.detect_for_video(user_mp_image, timestamp_ms)
                 if hand_result.hand_landmarks:
                     img = draw_hands_on_image(img, hand_result)
-
-                # 타임스탬프 증가
-                user_state['timestamp_ms'] += 33  # ~30fps
 
             except Exception as e:
                 import traceback
                 print(f"[ERROR] MediaPipe 처리 실패: {e}")
                 traceback.print_exc()
-                cv2.putText(img, 'Error: Check console', (10, 30),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
             return av.VideoFrame.from_ndarray(img, format="rgb24")
 
-        # WebRTC 스트리머 설정
+        # WebRTC 스트리머
         webrtc_ctx = webrtc_streamer(
             key="user_camera_action",
             mode=WebRtcMode.SENDRECV,
@@ -3730,39 +3792,45 @@ def show_action_page():
         )
 
     # =============================================================================
-    # 피드백 업데이트 (WebRTC playing 중일 때)
-    # st_autorefresh로 주기적으로 user_state 읽어서 표시
+    # 피드백 업데이트
     # =============================================================================
     if webrtc_ctx.state.playing:
         st.session_state.action_webcam_running = True
 
-        # 2초마다 피드백 업데이트
-        count = st_autorefresh(interval=2000, key="feedback_refresh")
+        # 1초마다 피드백 업데이트
+        st_autorefresh(interval=1000, key="action_feedback_refresh")
 
-        # user_state에서 최신 피드백 읽기
-        if user_state['feedback_score'] > 0:
-            score = user_state['feedback_score']
-            feedback_messages = user_state['feedback_messages']
-            coverage = user_state['joint_coverage']
+        # 공유 상태에서 피드백 읽기
+        state = get_webrtc_state('action_page')
+        score = state.get('feedback_score', 0)
+        feedback_messages = state.get('feedback_messages', [])
+        coverage = state.get('joint_coverage', 0)
 
+        if expert_reference_landmarks and score > 0:
             # 점수에 따른 색상
             score_color = "🟢" if score >= 80 else "🟡" if score >= 60 else "🔴"
 
-            # 피드백 텍스트 구성
-            feedback_text = f"**{score_color} {score:.0f}점, 감지된 관절: {coverage}%**\n\n"
+            feedback_text = f"**{score_color} {score:.0f}점, 감지된 관절: {coverage}%**
+
+"
             if feedback_messages:
-                for fb in feedback_messages:
-                    feedback_text += f"{fb}\n\n"
+                for fb in feedback_messages[:3]:
+                    feedback_text += f"{fb}
+
+"
             else:
                 feedback_text += "🟢 완벽합니다!"
 
             feedback_placeholder.markdown(feedback_text)
             st.session_state.comparison_score = score
+        elif state.get('pose_detected', False):
+            feedback_placeholder.success("✅ 자세 감지 중...")
         else:
-            feedback_placeholder.info("💃 자세를 취해주세요! 전문가 동작과 실시간 비교가 시작됩니다.")
+            feedback_placeholder.warning("⏳ 카메라 앞에 서주세요")
     else:
-        feedback_placeholder.info("▶️ 오른쪽 'START' 버튼을 눌러 카메라를 시작하세요.")
         st.session_state.action_webcam_running = False
+        # 상태 초기화
+        reset_webrtc_state('action_page')
 
     # 전문가 영상 처리 버튼 (JSON이 없는 경우만 표시)
     if not os.path.exists(landmarks_json_path) and os.path.exists(video_path):
@@ -3794,6 +3862,7 @@ def show_action_page():
         if st.session_state.current_action not in st.session_state.completed_actions:
             st.session_state.completed_actions.append(st.session_state.current_action)
 
+        reset_webrtc_state('action_page')
         st.session_state.current_action += 1
         st.session_state.action_webcam_running = False
         if st.session_state.current_action >= len(basic_actions):
@@ -3807,6 +3876,8 @@ def show_action_page():
         badge = badge_system[completed_count]
         st.session_state.badges.append(completed_count)
         st.success(f"{badge['emoji']} {badge['name']} {t('badge_earned')} {badge['message']}")
+
+
 
 def show_expanded_action_page():
     # 현재 언어에 맞는 확장 동작 가져오기
@@ -5777,18 +5848,10 @@ def show_pose_test_page():
     </div>
     """, unsafe_allow_html=True)
 
-    # 세션 상태 초기화
-    if 'pose_landmarks_data' not in st.session_state:
-        st.session_state.pose_landmarks_data = []
-    if 'hand_landmarks_data' not in st.session_state:
-        st.session_state.hand_landmarks_data = []
-    if 'frame_count' not in st.session_state:
-        st.session_state.frame_count = 0
-
     # 메인 컨텐츠
     col1, col2 = st.columns([2, 1])
 
-    # col2(설정)를 먼저 렌더링하여 변수들을 정의
+    # col2(설정)를 먼저 렌더링
     with col2:
         st.markdown("### ⚙️ 설정")
 
@@ -5818,11 +5881,10 @@ def show_pose_test_page():
             help="웹캠 화면에 자세 랜드마크를 표시"
         )
 
-        # MediaPipe Hands 활성화
         enable_hands = st.checkbox(
             "✋ MediaPipe Hands 활성화",
             value=False,
-            help="손 랜드마크 감지 및 표시 (21개 랜드마크/손)"
+            help="손 랜드마크 감지 및 표시"
         )
 
         st.markdown("---")
@@ -5830,7 +5892,6 @@ def show_pose_test_page():
         # 전문가 자세 비교 설정
         st.markdown("#### 🎯 전문가 자세 비교")
 
-        # 사용 가능한 전문가 랜드마크 파일 목록
         expert_landmarks_dir = "data/expert_landmarks"
         expert_files = []
         if os.path.exists(expert_landmarks_dir):
@@ -5862,25 +5923,6 @@ def show_pose_test_page():
         # 피드백 표시 영역
         feedback_container = st.container()
 
-        # MediaPipe Pose 랜드마크 정보
-        with st.expander("🎯 MediaPipe Pose 랜드마크 (33개)", expanded=False):
-            st.markdown("""
-            **얼굴/머리 (8개)**
-            - 0: 코, 1-4: 눈, 5-8: 입
-
-            **상체 (14개)**
-            - 11-12: 어깨
-            - 13-14: 팔꿈치
-            - 15-16: 손목
-            - 17-22: 손 (엄지, 검지, 새끼손가락)
-
-            **하체 (11개)**
-            - 23-24: 엉덩이
-            - 25-26: 무릎
-            - 27-28: 발목
-            - 29-32: 발 (뒤꿈치, 발끝)
-            """)
-
         # 사용 가이드
         with st.expander("📖 사용 가이드", expanded=False):
             st.markdown("""
@@ -5888,159 +5930,97 @@ def show_pose_test_page():
             1. 'START' 버튼을 클릭하여 카메라 시작
             2. 브라우저에서 카메라 권한 허용
             3. 카메라 앞에서 몸 전체가 나오도록 서세요
-            4. 랜드마크가 자동으로 감지되어 표시됩니다
-
-            **전문가 자세 비교:**
-            - 우측 패널에서 '전문가 자세 비교 활성화' 체크
-            - 비교할 동작 선택
-            - 실시간으로 자세 유사도 점수 표시
 
             **팁:**
             - 조명이 밝은 곳에서 사용하세요
             - 배경이 단순할수록 감지 정확도가 높아집니다
-            - 카메라와 2-3m 거리를 유지하세요
             """)
 
-    # col1(웹캠)은 설정 변수들이 정의된 후 렌더링
+    # col1(웹캠)
     with col1:
         st.markdown("### 📹 웹캠 영상")
-        st.info("👆 아래 'START' 버튼을 눌러 카메라를 시작하세요 (브라우저 권한 허용 필요)")
 
         # =============================================================================
-        # MediaPipe 초기화 (WebRTC 콜백 외부에서 생성)
-        # WebRTC 콜백은 별도 스레드에서 실행되어 st.session_state 접근 불가
-        # 해결: 콜백 외부에서 생성 후 클로저로 전달
+        # 캐시된 MediaPipe 사용
         # =============================================================================
-        pose_model_path = os.path.join(os.path.dirname(__file__), "models", "pose_landmarker_lite.task")
-        pose_base_options = python.BaseOptions(model_asset_path=pose_model_path)
-        pose_options = vision.PoseLandmarkerOptions(
-            base_options=pose_base_options,
-            running_mode=vision.RunningMode.VIDEO,
-            min_pose_detection_confidence=min_detection_confidence,
-            min_tracking_confidence=min_tracking_confidence
-        )
-        pose_landmarker = vision.PoseLandmarker.create_from_options(pose_options)
+        pose_landmarker = get_pose_landmarker(min_detection_confidence, min_tracking_confidence)
+        hand_landmarker = get_hand_landmarker(min_detection_confidence, min_tracking_confidence) if enable_hands else None
 
-        # MediaPipe Hand Landmarker 초기화 (enable_hands가 True일 때만)
-        hand_landmarker = None
-        if enable_hands:
-            hand_model_path = os.path.join(os.path.dirname(__file__), "models", "hand_landmarker.task")
-            hand_base_options = python.BaseOptions(model_asset_path=hand_model_path)
-            hand_options = vision.HandLandmarkerOptions(
-                base_options=hand_base_options,
-                running_mode=vision.RunningMode.VIDEO,
-                num_hands=2,
-                min_hand_detection_confidence=min_detection_confidence,
-                min_tracking_confidence=min_tracking_confidence
-            )
-            hand_landmarker = vision.HandLandmarker.create_from_options(hand_options)
-
-        # 전문가 랜드마크 로드 (비교 활성화 시)
+        # 전문가 랜드마크 로드
         expert_reference_landmarks = None
         if enable_comparison and selected_expert:
             expert_json_path = f"{expert_landmarks_dir}/{selected_expert}_landmarks.json"
             if os.path.exists(expert_json_path):
                 expert_reference_landmarks = load_expert_landmarks(expert_json_path)
-                if expert_reference_landmarks:
-                    st.success(f"✅ '{selected_expert}' 자세 데이터 로드 완료")
-
-        # 상태 공유용 딕셔너리 (session_state 대신 사용)
-        user_state = {
-            'timestamp_ms': 0,
-            'latest_landmarks': None,
-            'pose_detected': False,
-            'hands_detected': 0,
-            'feedback_score': 0,
-            'feedback_messages': [],
-            'joint_coverage': 0,
-        }
 
         # WebRTC 비디오 프레임 콜백 함수
         def video_frame_callback(frame: av.VideoFrame) -> av.VideoFrame:
-            """
-            사용자 카메라 프레임 처리 (WebRTC)
-            - MediaPipe 객체는 클로저로 전달받음
-            - 결과는 user_state에 저장 (session_state 접근 불가)
-            """
             img = frame.to_ndarray(format="rgb24")
-            img = cv2.flip(img, 1)  # 좌우 반전 (거울 효과)
+            img = cv2.flip(img, 1)
 
             try:
-                # MediaPipe Image로 변환
+                state = get_webrtc_state('pose_test_page')
+                timestamp_ms = state.get('timestamp_ms', 0)
+
                 mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img)
+                pose_result = pose_landmarker.detect_for_video(mp_image, timestamp_ms)
 
-                # Pose 감지
-                pose_result = pose_landmarker.detect_for_video(
-                    mp_image,
-                    user_state['timestamp_ms']
-                )
-
-                # Pose 랜드마크 그리기
                 if show_landmarks and pose_result.pose_landmarks:
                     img = draw_landmarks_on_image(img, pose_result)
-                    user_state['latest_landmarks'] = pose_result.pose_landmarks[0]
-                    user_state['pose_detected'] = True
 
-                    # 전문가 자세와 비교
                     if expert_reference_landmarks:
                         try:
                             comparison_result = compare_poses(
                                 pose_result.pose_landmarks[0],
                                 expert_reference_landmarks
                             )
-                            user_state['feedback_score'] = comparison_result['overall_score']
-                            user_state['feedback_messages'] = comparison_result['feedback']
-                            user_state['joint_coverage'] = comparison_result.get('joint_coverage_percent', 100)
-
-                            # 점수 표시
                             score = comparison_result['overall_score']
                             color = (0, 255, 0) if score >= 80 else (255, 165, 0) if score >= 60 else (255, 0, 0)
                             cv2.putText(img, f'Score: {score}%', (10, 30),
                                        cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+
+                            update_webrtc_state('pose_test_page', {
+                                'feedback_score': score,
+                                'feedback_messages': comparison_result['feedback'],
+                                'joint_coverage': comparison_result.get('joint_coverage_percent', 100),
+                                'pose_detected': True,
+                                'timestamp_ms': timestamp_ms + 33,
+                            })
                         except Exception as e:
                             print(f"[ERROR] 자세 비교 실패: {e}")
                     else:
                         cv2.putText(img, 'Pose: OK', (10, 30),
                                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+                        update_webrtc_state('pose_test_page', {
+                            'pose_detected': True,
+                            'timestamp_ms': timestamp_ms + 33,
+                        })
                 else:
-                    cv2.putText(img, 'Pose: Not Detected', (10, 30),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
-                    user_state['latest_landmarks'] = None
-                    user_state['pose_detected'] = False
-                    user_state['feedback_score'] = 0
-                    user_state['feedback_messages'] = []
+                    update_webrtc_state('pose_test_page', {
+                        'pose_detected': False,
+                        'feedback_score': 0,
+                        'timestamp_ms': timestamp_ms + 33,
+                    })
 
-                # Hands 감지 (활성화된 경우)
+                # Hands 감지
                 if enable_hands and hand_landmarker:
-                    hand_result = hand_landmarker.detect_for_video(
-                        mp_image,
-                        user_state['timestamp_ms']
-                    )
-
+                    hand_result = hand_landmarker.detect_for_video(mp_image, timestamp_ms)
                     if hand_result.hand_landmarks:
                         img = draw_hands_on_image(img, hand_result)
-                        user_state['hands_detected'] = len(hand_result.hand_landmarks)
-
-                        # Hands 상태 표시
-                        y_offset = 70
-                        cv2.putText(img, f'Hands: {user_state["hands_detected"]}', (10, y_offset),
-                                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 255), 2)
+                        update_webrtc_state('pose_test_page', {
+                            'hands_detected': len(hand_result.hand_landmarks)
+                        })
                     else:
-                        user_state['hands_detected'] = 0
-
-                # 타임스탬프 증가
-                user_state['timestamp_ms'] += 33  # ~30fps
+                        update_webrtc_state('pose_test_page', {'hands_detected': 0})
 
             except Exception as e:
                 import traceback
                 print(f"[ERROR] MediaPipe 처리 실패: {e}")
                 traceback.print_exc()
-                cv2.putText(img, 'Error: Check console', (10, 30),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
 
             return av.VideoFrame.from_ndarray(img, format="rgb24")
 
-        # WebRTC 스트리머 설정
+        # WebRTC 스트리머
         webrtc_ctx = webrtc_streamer(
             key="pose_test_camera",
             mode=WebRtcMode.SENDRECV,
@@ -6050,47 +6030,51 @@ def show_pose_test_page():
             async_processing=True,
         )
 
-        # 피드백 자동 업데이트 (WebRTC 실행 중일 때)
+        # 피드백 업데이트
         if webrtc_ctx.state.playing:
-            # 2초마다 자동 새로고침
-            count = st_autorefresh(interval=2000, key="pose_test_feedback_refresh")
+            st_autorefresh(interval=1000, key="pose_test_feedback_refresh")
 
-            # 피드백 표시
+            state = get_webrtc_state('pose_test_page')
+
             with feedback_container:
                 if enable_comparison and expert_reference_landmarks:
-                    score = user_state['feedback_score']
-                    messages = user_state['feedback_messages']
-                    joint_coverage = user_state['joint_coverage']
+                    score = state.get('feedback_score', 0)
+                    messages = state.get('feedback_messages', [])
+                    joint_coverage = state.get('joint_coverage', 0)
 
-                    # 점수 표시
                     if score >= 80:
                         st.success(f"🎯 유사도: {score}%")
                     elif score >= 60:
                         st.warning(f"🎯 유사도: {score}%")
-                    else:
+                    elif score > 0:
                         st.error(f"🎯 유사도: {score}%")
+                    else:
+                        st.info("📊 자세를 분석하는 중...")
 
-                    # 관절 커버리지
-                    st.progress(joint_coverage / 100, text=f"관절 감지율: {joint_coverage}%")
+                    if joint_coverage > 0:
+                        st.progress(joint_coverage / 100, text=f"관절 감지율: {joint_coverage}%")
 
-                    # 피드백 메시지
                     if messages:
-                        for msg in messages[:3]:  # 최대 3개 표시
-                            st.info(msg)
+                        for msg in messages[:3]:
+                            st.caption(msg)
                 else:
-                    if user_state['pose_detected']:
+                    if state.get('pose_detected', False):
                         st.success("✅ 자세 감지 중")
                     else:
-                        st.warning("⏳ 자세를 감지하는 중...")
+                        st.info("📊 자세를 분석하는 중...")
 
-                    if enable_hands and user_state['hands_detected'] > 0:
-                        st.info(f"✋ 손 감지: {user_state['hands_detected']}개")
+                    if enable_hands and state.get('hands_detected', 0) > 0:
+                        st.info(f"✋ 손 감지: {state['hands_detected']}개")
+        else:
+            reset_webrtc_state('pose_test_page')
 
     # 뒤로가기 버튼
     st.markdown("---")
     if st.button("🏠 홈으로 돌아가기", use_container_width=True):
+        reset_webrtc_state('pose_test_page')
         st.session_state.current_step = 'landing'
         st.rerun()
+
 
 
 def convert_landmarks_to_csv(pose_landmarks_data, hand_landmarks_data):
