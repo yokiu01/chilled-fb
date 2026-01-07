@@ -9,13 +9,21 @@ pandas>=2.0.0
 numpy>=1.24.0
 
 # 컴퓨터 비전 및 MediaPipe
-# 로컬 웹캠 사용 시: opencv-python (GUI/카메라 지원)
-# 클라우드 배포 시: opencv-python-headless (GUI 없음)
-opencv-python>=4.8.0
+# Streamlit Cloud 배포용: opencv-python-headless (GUI 없음)
+# WebRTC가 브라우저 카메라를 처리하므로 headless로 충분
+opencv-python-headless>=4.8.0
 mediapipe>=0.10.0
 
 # 이미지 처리
 Pillow>=10.0.0
+
+# WebRTC (브라우저 카메라 접근 - Streamlit Cloud 필수)
+# 상세: ISSUES_LOG.md [7], [8] 참조
+streamlit-webrtc>=0.45.0
+av>=10.0.0
+
+# 피드백 자동 업데이트 (WebRTC 콜백 → 메인 스레드 동기화)
+streamlit-autorefresh>=1.0.0
 
 # 구글 시트 연동 (기존 기능용)
 st-gsheets-connection>=0.0.3
