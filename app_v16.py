@@ -3659,32 +3659,8 @@ def show_action_page():
         else:
             expert_video_placeholder.info(f"{action['name']} 시범 영상 - 업로드 예정")
 
-        # 웹캠 초기화 (Windows DirectShow 백엔드 사용)
-        cap = None
-        camera_opened = False
-
-        # Windows에서는 DirectShow 백엔드가 더 안정적
-        for camera_index in [0, 1, 2]:
-            cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
-            if cap.isOpened():
-                camera_opened = True
-                break
-            cap.release()
-
-        # DirectShow 실패 시 기본 백엔드로 재시도
-        if not camera_opened:
-            for camera_index in [0, 1, 2]:
-                cap = cv2.VideoCapture(camera_index)
-                if cap.isOpened():
-                    camera_opened = True
-                    break
-                cap.release()
-
-        if not camera_opened:
-            user_video_placeholder.error("❌ 웹캠을 열 수 없습니다. 다음을 확인해주세요:\n- 웹캠이 연결되어 있는지\n- 다른 프로그램이 웹캠을 사용 중인지\n- Windows 설정에서 카메라 권한이 허용되어 있는지")
-            st.session_state.action_webcam_running = False
-            st.stop()
-
+        # 웹캠 초기화
+        cap = cv2.VideoCapture(0)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
@@ -5910,32 +5886,8 @@ def show_pose_test_page():
 
                 hand_landmarker = vision.HandLandmarker.create_from_options(hand_options)
 
-            # 웹캠 초기화 (Windows DirectShow 백엔드 사용)
-            cap = None
-            camera_opened = False
-
-            # Windows에서는 DirectShow 백엔드가 더 안정적
-            for camera_index in [0, 1, 2]:
-                cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
-                if cap.isOpened():
-                    camera_opened = True
-                    break
-                cap.release()
-
-            # DirectShow 실패 시 기본 백엔드로 재시도
-            if not camera_opened:
-                for camera_index in [0, 1, 2]:
-                    cap = cv2.VideoCapture(camera_index)
-                    if cap.isOpened():
-                        camera_opened = True
-                        break
-                    cap.release()
-
-            if not camera_opened:
-                video_placeholder.error("❌ 웹캠을 열 수 없습니다. 다음을 확인해주세요:\n- 웹캠이 연결되어 있는지\n- 다른 프로그램이 웹캠을 사용 중인지\n- Windows 설정에서 카메라 권한이 허용되어 있는지")
-                st.session_state.webcam_running = False
-                st.stop()
-
+            # 웹캠 초기화
+            cap = cv2.VideoCapture(0)
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
             cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
 
@@ -5949,7 +5901,7 @@ def show_pose_test_page():
                     ret, frame = cap.read()
 
                     if not ret:
-                        video_placeholder.error("❌ 웹캠에서 영상을 읽을 수 없습니다.")
+                        st.error("❌ 웹캠에서 영상을 읽을 수 없습니다. 웹캠이 연결되어 있는지 확인하세요.")
                         break
 
                     # BGR을 RGB로 변환
