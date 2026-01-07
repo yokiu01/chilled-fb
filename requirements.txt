@@ -9,7 +9,9 @@ pandas>=2.0.0
 numpy>=1.24.0
 
 # 컴퓨터 비전 및 MediaPipe
-opencv-python-headless>=4.8.0
+# 로컬 웹캠 사용 시: opencv-python (GUI/카메라 지원)
+# 클라우드 배포 시: opencv-python-headless (GUI 없음)
+opencv-python>=4.8.0
 mediapipe>=0.10.0
 
 # 이미지 처리

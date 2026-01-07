@@ -3661,6 +3661,10 @@ def show_action_page():
 
         # 웹캠 초기화
         cap = cv2.VideoCapture(0)
+        if not cap.isOpened():
+            st.error("❌ 웹캠을 열 수 없습니다. 다른 프로그램(브라우저 포함)에서 웹캠을 사용 중인지 확인하세요.")
+            st.session_state.action_webcam_running = False
+            st.rerun()
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
