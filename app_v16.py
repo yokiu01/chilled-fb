@@ -3688,6 +3688,8 @@ def show_action_page():
 
                 if user_result.pose_landmarks:
                     img = draw_landmarks_on_image(img, user_result)
+                    num_lm = len(user_result.pose_landmarks[0]) if user_result.pose_landmarks else 0
+                    cv2.putText(img, f'Landmarks: {num_lm}', (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
 
                     if expert_reference_landmarks:
                         try:
@@ -3703,11 +3705,13 @@ def show_action_page():
                                 'timestamp_ms': timestamp_ms + 33,
                             })
                         except Exception as e:
+                            cv2.putText(img, f'Err: {str(e)[:30]}', (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
                             update_webrtc_state('action_page', {'pose_detected': True, 'timestamp_ms': timestamp_ms + 33})
                     else:
-                        cv2.putText(img, 'Pose: OK', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+                        cv2.putText(img, 'Pose OK (no expert)', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
                         update_webrtc_state('action_page', {'pose_detected': True, 'timestamp_ms': timestamp_ms + 33})
                 else:
+                    cv2.putText(img, 'No pose detected', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 165, 0), 2)
                     update_webrtc_state('action_page', {'pose_detected': False, 'feedback_score': 0, 'timestamp_ms': timestamp_ms + 33})
 
                 hand_result = user_hand_landmarker.detect_for_video(user_mp_image, timestamp_ms)
@@ -3717,6 +3721,7 @@ def show_action_page():
             except Exception as e:
                 import traceback
                 traceback.print_exc()
+                cv2.putText(img, f'Error: {str(e)[:40]}', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
             return av.VideoFrame.from_ndarray(img, format="rgb24")
 
