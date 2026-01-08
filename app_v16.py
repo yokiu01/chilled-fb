@@ -4032,197 +4032,165 @@ def show_action_page():
         st.warning(f"⚠️ 전문가 랜드마크 파일 없음: {landmarks_json_path}")
 
     # ===========================================================================
-    # 7. 세션 상태 추가 초기화 (피드백 표시용)
-    # ===========================================================================
-    if 'last_feedback_text' not in st.session_state:
-        st.session_state.last_feedback_text = ""
-
-    # ===========================================================================
-    # 8. 웹캠 제어 버튼
-    # ===========================================================================
-    button_col1, button_col2, button_col3 = st.columns([1, 1, 4])
-    with button_col1:
-        if st.button("▶️ 웹캠 시작", key="action_start", use_container_width=True,
-                    disabled=st.session_state.action_webcam_running):
-            st.session_state.action_webcam_running = True
-            st.rerun()
-    with button_col2:
-        if st.button("⏹️ 웹캠 중지", key="action_stop", use_container_width=True,
-                    disabled=not st.session_state.action_webcam_running):
-            st.session_state.action_webcam_running = False
-            st.rerun()
-
-    # ===========================================================================
-    # 9. 2열 레이아웃 UI (전문가 영상 | 사용자 웹캠)
+    # 7. 2열 레이아웃 UI (전문가 영상 | 사용자 웹캠)
     # ===========================================================================
     col1, col2 = st.columns(2)
 
+    # -------------------------------------------------------------------------
+    # 7-1. 왼쪽 컬럼: 전문가 시범 영상 + 피드백 표시
+    # -------------------------------------------------------------------------
     with col1:
         st.markdown(f"#### {t('expert_demo')}")
-        expert_video_placeholder = st.empty()
+        # 스켈레톤 오버레이된 영상이 있으면 우선 사용 (학습에 더 효과적)
+        if os.path.exists(processed_video_path):
+            st.video(processed_video_path, loop=True, autoplay=True, muted=True)
+        elif os.path.exists(video_path):
+            # 원본 영상 재생
+            st.video(video_path, loop=True, autoplay=True, muted=True)
+        else:
+            st.info(f"{action['name']} 시범 영상 - 업로드 예정")
+        # 피드백 표시 영역 (전문가 영상 아래)
         feedback_placeholder = st.empty()
 
+    # -------------------------------------------------------------------------
+    # 7-2. 오른쪽 컬럼: 사용자 웹캠 (WebRTC 기반)
+    # -------------------------------------------------------------------------
     with col2:
         st.markdown(f"#### {t('your_movement')}")
-        user_video_placeholder = st.empty()
 
-    # ===========================================================================
-    # 10. 웹캠 실행 (cv2.VideoCapture 방식 - 깜박임 없음)
-    # ===========================================================================
-    if st.session_state.action_webcam_running:
-        # MediaPipe 모델 초기화
-        pose_model_path = os.path.join(os.path.dirname(__file__), "models", "pose_landmarker_lite.task")
+        # MediaPipe 모델 가져오기 (@st.cache_resource로 캐시됨)
+        # - Pose Landmarker: 33개 신체 랜드마크 감지
+        # - Hand Landmarker: 21개 손 랜드마크 감지 (선택적)
+        user_pose_landmarker = get_pose_landmarker(0.5, 0.5)
+        user_hand_landmarker = get_hand_landmarker(0.5, 0.5)
 
-        # 사용자 웹캠용 Pose Landmarker
-        user_base_options = python.BaseOptions(model_asset_path=pose_model_path)
-        user_options = vision.PoseLandmarkerOptions(
-            base_options=user_base_options,
-            running_mode=vision.RunningMode.VIDEO,
-            min_pose_detection_confidence=0.5,
-            min_tracking_confidence=0.5
-        )
-        user_pose_landmarker = vision.PoseLandmarker.create_from_options(user_options)
+        # ---------------------------------------------------------------------
+        # WebRTC 비디오 프레임 콜백 함수
+        # ---------------------------------------------------------------------
+        # 주의: 이 함수는 별도의 스레드에서 실행됨!
+        # - st.session_state에 직접 접근 불가 (Streamlit 컨텍스트 없음)
+        # - 대신 모듈 레벨 전역 변수(_webrtc_shared_state)를 통해 데이터 공유
+        # - update_webrtc_state()로 상태 업데이트 → UI는 st_autorefresh로 반영
+        # - update_feedback_analytics()로 점수 평활화 및 피드백 안정화
+        def video_frame_callback(frame: av.VideoFrame) -> av.VideoFrame:
+            """
+            WebRTC 스트림의 각 프레임을 처리하는 콜백
+            - 피드백을 영상 위에 직접 오버레이 (깜박임 없음)
+            """
+            global _last_comparison_time
+            img = frame.to_ndarray(format="rgb24")
+            img = cv2.flip(img, 1)
+            h, w = img.shape[:2]
 
-        # Hand Landmarker
-        hand_model_path = os.path.join(os.path.dirname(__file__), "models", "hand_landmarker.task")
-        user_hand_base_options = python.BaseOptions(model_asset_path=hand_model_path)
-        user_hand_options = vision.HandLandmarkerOptions(
-            base_options=user_hand_base_options,
-            running_mode=vision.RunningMode.VIDEO,
-            num_hands=2,
-            min_hand_detection_confidence=0.5,
-            min_tracking_confidence=0.5
-        )
-        user_hand_landmarker = vision.HandLandmarker.create_from_options(user_hand_options)
+            try:
+                import time
+                current_time = time.time()
+                timestamp_ms = int(current_time * 1000)
 
-        # 전문가 영상 캡처 초기화
-        expert_cap = None
-        expert_landmarks = None
-        if os.path.exists(processed_video_path):
-            expert_cap = cv2.VideoCapture(processed_video_path)
-        elif os.path.exists(video_path):
-            expert_cap = cv2.VideoCapture(video_path)
-
-        expert_fps = expert_cap.get(cv2.CAP_PROP_FPS) if expert_cap else 30
-
-        # 웹캠 초기화
-        cap = cv2.VideoCapture(0)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-
-        # 타임스탬프 초기화
-        expert_timestamp_ms = 0
-        user_timestamp_ms = 0
-        user_frame_count = 0
-
-        # 비교 간격 (30프레임 = 약 1초)
-        comparison_interval = 30
-        last_comparison_frame = -30
-
-        try:
-            while st.session_state.action_webcam_running:
-                # 1. 전문가 영상 프레임 처리
-                if expert_cap and expert_cap.isOpened():
-                    ret_expert, expert_frame = expert_cap.read()
-                    if not ret_expert:
-                        expert_cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                        ret_expert, expert_frame = expert_cap.read()
-
-                    if ret_expert:
-                        expert_frame_rgb = cv2.cvtColor(expert_frame, cv2.COLOR_BGR2RGB)
-                        expert_video_placeholder.image(expert_frame_rgb, channels="RGB", use_container_width=True)
-                        expert_timestamp_ms += int(1000 / expert_fps)
-
-                # 2. 사용자 웹캠 프레임 처리
-                ret_user, user_frame = cap.read()
-                if not ret_user:
-                    st.error("❌ 웹캠에서 영상을 읽을 수 없습니다.")
-                    break
-
-                user_frame_rgb = cv2.cvtColor(user_frame, cv2.COLOR_BGR2RGB)
-                user_frame_rgb = cv2.flip(user_frame_rgb, 1)
-
-                # MediaPipe Pose 감지
-                user_mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=user_frame_rgb)
-                user_result = user_pose_landmarker.detect_for_video(user_mp_image, user_timestamp_ms)
+                user_mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img)
+                user_result = user_pose_landmarker.detect_for_video(user_mp_image, timestamp_ms)
 
                 if user_result.pose_landmarks:
-                    user_frame_rgb = draw_landmarks_on_image(user_frame_rgb, user_result, page_key='action_page')
-                    user_landmarks = user_result.pose_landmarks[0]
+                    img = draw_landmarks_on_image(img, user_result, page_key='action_page')
+                    update_webrtc_state('action_page', {'pose_detected': True})
 
-                    # 자세 비교 (1초마다)
-                    if user_frame_count - last_comparison_frame >= comparison_interval:
-                        if expert_reference_landmarks:
-                            comparison_result = compare_poses(user_landmarks, expert_reference_landmarks)
-                            st.session_state.comparison_score = comparison_result['overall_score']
-                            st.session_state.comparison_feedback = comparison_result['feedback']
-                            st.session_state.joint_coverage_percent = comparison_result['joint_coverage_percent']
-                            last_comparison_frame = user_frame_count
+                    # 자세 비교 (0.5초마다)
+                    if current_time - _last_comparison_time['action_page'] >= 0.5:
+                        expert_lm = get_expert_landmarks('action_page')
+                        if expert_lm:
+                            try:
+                                comparison_result = compare_poses(user_result.pose_landmarks[0], expert_lm)
+                                raw_score = comparison_result['overall_score']
+                                raw_feedback = comparison_result['feedback']
 
-                # Hand 감지
-                user_hand_result = user_hand_landmarker.detect_for_video(user_mp_image, user_timestamp_ms)
-                if user_hand_result.hand_landmarks:
-                    user_frame_rgb = draw_hands_on_image(user_frame_rgb, user_hand_result)
+                                update_feedback_analytics('action_page', raw_score, raw_feedback, current_time)
+                                analytics = get_feedback_analytics('action_page')
 
-                # 사용자 웹캠 표시
-                user_video_placeholder.image(user_frame_rgb, channels="RGB", use_container_width=True)
+                                update_webrtc_state('action_page', {
+                                    'feedback_score': analytics['smoothed_score'],
+                                    'feedback_messages': analytics['stable_feedback'],
+                                    'joint_coverage': comparison_result.get('joint_coverage_percent', 100),
+                                    'pose_detected': True,
+                                    'score_trend': analytics['score_trend'],
+                                    'good_pose_time': analytics['good_pose_time'],
+                                })
+                                _last_comparison_time['action_page'] = current_time
+                            except Exception as e:
+                                print(f"[ACTION] 비교 오류: {e}")
 
-                # 피드백 표시 (깜빡임 방지: 변경시에만 업데이트)
-                if st.session_state.comparison_score > 0:
-                    score_color = "🟢" if st.session_state.comparison_score >= 80 else "🟡" if st.session_state.comparison_score >= 60 else "🔴"
-                    coverage_percent = st.session_state.get('joint_coverage_percent', 100)
-                    feedback_text = f"**{score_color} {st.session_state.comparison_score:.0f}점, 카메라에 감지된 관절: {coverage_percent}%**\n\n"
+                    # 피드백을 영상 위에 직접 오버레이
+                    state = get_webrtc_state('action_page')
+                    score = state.get('feedback_score', 0)
+                    if score > 0:
+                        # 점수 배경 박스
+                        if score >= 80:
+                            box_color = (0, 200, 0)  # 초록
+                        elif score >= 60:
+                            box_color = (0, 200, 255)  # 노랑
+                        else:
+                            box_color = (0, 0, 200)  # 빨강
 
-                    if st.session_state.comparison_feedback:
-                        for fb in st.session_state.comparison_feedback:
-                            feedback_text += f"{fb}\n\n"
-                    else:
-                        feedback_text += "🟢 완벽합니다!"
+                        # 반투명 배경
+                        overlay = img.copy()
+                        cv2.rectangle(overlay, (10, 10), (180, 70), box_color, -1)
+                        cv2.addWeighted(overlay, 0.7, img, 0.3, 0, img)
 
-                    if st.session_state.last_feedback_text != feedback_text:
-                        st.session_state.last_feedback_text = feedback_text
-                        feedback_placeholder.markdown(feedback_text)
-                    else:
-                        feedback_placeholder.markdown(feedback_text)
-                elif user_result.pose_landmarks and expert_reference_landmarks:
-                    new_text = "INFO:분석 중..."
-                    if st.session_state.last_feedback_text != new_text:
-                        st.session_state.last_feedback_text = new_text
-                        feedback_placeholder.info("분석 중...")
+                        # 점수 텍스트
+                        cv2.putText(img, f"Score: {score:.0f}", (20, 50),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3)
+
+                        # 피드백 메시지 (하단에 표시)
+                        messages = state.get('feedback_messages', [])
+                        if messages:
+                            # 하단 반투명 배경
+                            overlay2 = img.copy()
+                            cv2.rectangle(overlay2, (0, h-60), (w, h), (0, 0, 0), -1)
+                            cv2.addWeighted(overlay2, 0.5, img, 0.5, 0, img)
+                            # 첫 번째 피드백만 표시 (한글 대신 이모지+영역으로)
+                            fb = messages[0] if messages else ""
+                            # 한글 부분 추출 시도
+                            cv2.putText(img, fb[:30] if len(fb) <= 30 else fb[:30]+"...", (10, h-25),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
                 else:
-                    if st.session_state.comparison_score > 0:
-                        feedback_placeholder.markdown(st.session_state.last_feedback_text)
-                    else:
-                        new_text = "INFO:전신이 보이도록 자세를 취해주세요"
-                        if st.session_state.last_feedback_text != new_text:
-                            st.session_state.last_feedback_text = new_text
-                            feedback_placeholder.info("전신이 보이도록 자세를 취해주세요")
+                    update_webrtc_state('action_page', {'pose_detected': False})
+                    # "자세를 취해주세요" 메시지
+                    overlay = img.copy()
+                    cv2.rectangle(overlay, (10, 10), (200, 50), (100, 100, 100), -1)
+                    cv2.addWeighted(overlay, 0.7, img, 0.3, 0, img)
+                    cv2.putText(img, "Waiting...", (20, 40),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
 
-                # 타임스탬프 증가
-                user_timestamp_ms += int(1000 / 30)
-                user_frame_count += 1
-                time.sleep(0.01)
+                # 손 감지
+                hand_result = user_hand_landmarker.detect_for_video(user_mp_image, timestamp_ms)
+                if hand_result.hand_landmarks:
+                    img = draw_hands_on_image(img, hand_result)
 
-        except Exception as e:
-            st.error(f"❌ 오류 발생: {str(e)}")
-        finally:
-            cap.release()
-            if expert_cap:
-                expert_cap.release()
-            user_pose_landmarker.close()
-            user_hand_landmarker.close()
-            st.session_state.action_webcam_running = False
-    else:
-        # 웹캠 중지 상태
-        if os.path.exists(processed_video_path):
-            expert_video_placeholder.video(processed_video_path, loop=True, autoplay=True, muted=True)
-        elif os.path.exists(video_path):
-            expert_video_placeholder.video(video_path, loop=True, autoplay=True, muted=True)
-        else:
-            expert_video_placeholder.info(f"{action['name']} 시범 영상 - 업로드 예정")
+            except Exception as e:
+                import traceback
+                print(f"[ACTION] 콜백 예외: {e}")
+                traceback.print_exc()
 
-        user_video_placeholder.info(t('webcam_guide'))
-        feedback_placeholder.info("웹캠을 시작하고 자세를 취하면 즉시 피드백이 표시됩니다")
+            return av.VideoFrame.from_ndarray(img, format="rgb24")
+
+        # ---------------------------------------------------------------------
+        # WebRTC 스트리머 설정
+        # ---------------------------------------------------------------------
+        # - SENDRECV: 양방향 통신 (카메라 입력 + 처리된 영상 출력)
+        # - STUN 서버: NAT 통과를 위한 Google STUN 서버 사용
+        # - async_processing: True로 설정하여 비동기 처리 활성화
+        webrtc_ctx = webrtc_streamer(
+            key="user_camera_action",
+            mode=WebRtcMode.SENDRECV,
+            rtc_configuration=RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}),
+            video_frame_callback=video_frame_callback,
+            media_stream_constraints={"video": True, "audio": False},
+            async_processing=True,
+        )
+
+    # ===========================================================================
+    # 8. 안내 문구 (점수는 영상 위에 실시간 표시됨)
+    # ===========================================================================
+    feedback_placeholder.info("점수와 피드백이 영상 위에 실시간으로 표시됩니다")
 
     # ===========================================================================
     # 9. 전문가 영상 처리 버튼 (랜드마크 JSON이 없는 경우)
