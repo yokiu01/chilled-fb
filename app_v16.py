@@ -4075,12 +4075,11 @@ def show_action_page():
         def video_frame_callback(frame: av.VideoFrame) -> av.VideoFrame:
             """
             WebRTC 스트림의 각 프레임을 처리하는 콜백
-            - 피드백을 영상 위에 직접 오버레이 (깜박임 없음)
+            - 스켈레톤만 그리고, 피드백은 UI에서 표시
             """
             global _last_comparison_time
             img = frame.to_ndarray(format="rgb24")
             img = cv2.flip(img, 1)
-            h, w = img.shape[:2]
 
             try:
                 import time
@@ -4117,48 +4116,8 @@ def show_action_page():
                                 _last_comparison_time['action_page'] = current_time
                             except Exception as e:
                                 print(f"[ACTION] 비교 오류: {e}")
-
-                    # 피드백을 영상 위에 직접 오버레이
-                    state = get_webrtc_state('action_page')
-                    score = state.get('feedback_score', 0)
-                    if score > 0:
-                        # 점수 배경 박스
-                        if score >= 80:
-                            box_color = (0, 200, 0)  # 초록
-                        elif score >= 60:
-                            box_color = (0, 200, 255)  # 노랑
-                        else:
-                            box_color = (0, 0, 200)  # 빨강
-
-                        # 반투명 배경
-                        overlay = img.copy()
-                        cv2.rectangle(overlay, (10, 10), (180, 70), box_color, -1)
-                        cv2.addWeighted(overlay, 0.7, img, 0.3, 0, img)
-
-                        # 점수 텍스트
-                        cv2.putText(img, f"Score: {score:.0f}", (20, 50),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3)
-
-                        # 피드백 메시지 (하단에 표시)
-                        messages = state.get('feedback_messages', [])
-                        if messages:
-                            # 하단 반투명 배경
-                            overlay2 = img.copy()
-                            cv2.rectangle(overlay2, (0, h-60), (w, h), (0, 0, 0), -1)
-                            cv2.addWeighted(overlay2, 0.5, img, 0.5, 0, img)
-                            # 첫 번째 피드백만 표시 (한글 대신 이모지+영역으로)
-                            fb = messages[0] if messages else ""
-                            # 한글 부분 추출 시도
-                            cv2.putText(img, fb[:30] if len(fb) <= 30 else fb[:30]+"...", (10, h-25),
-                                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
                 else:
                     update_webrtc_state('action_page', {'pose_detected': False})
-                    # "자세를 취해주세요" 메시지
-                    overlay = img.copy()
-                    cv2.rectangle(overlay, (10, 10), (200, 50), (100, 100, 100), -1)
-                    cv2.addWeighted(overlay, 0.7, img, 0.3, 0, img)
-                    cv2.putText(img, "Waiting...", (20, 40),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
 
                 # 손 감지
                 hand_result = user_hand_landmarker.detect_for_video(user_mp_image, timestamp_ms)
@@ -4188,9 +4147,50 @@ def show_action_page():
         )
 
     # ===========================================================================
-    # 8. 안내 문구 (점수는 영상 위에 실시간 표시됨)
+    # 8. 실시간 피드백 표시 (@st.fragment로 부분 새로고침)
     # ===========================================================================
-    feedback_placeholder.info("점수와 피드백이 영상 위에 실시간으로 표시됩니다")
+    # 세션 상태 초기화
+    if 'last_feedback_text' not in st.session_state:
+        st.session_state.last_feedback_text = ""
+
+    @st.fragment(run_every=2)  # 2초마다 이 영역만 새로고침
+    def render_feedback():
+        """피드백 영역만 부분 새로고침 (전체 페이지 깜박임 방지)"""
+        state = get_webrtc_state('action_page')
+        score = state.get('feedback_score', 0)
+        messages = state.get('feedback_messages', [])
+        coverage = state.get('joint_coverage', 0)
+        pose_detected = state.get('pose_detected', False)
+        expert_lm = get_expert_landmarks('action_page')
+        is_playing = webrtc_ctx.state.playing if webrtc_ctx else False
+
+        if not is_playing:
+            st.info("웹캠을 시작하고 자세를 취하면 즉시 피드백이 표시됩니다")
+            return
+
+        if score > 0:
+            # 참조 파일 디자인: 점수 + 감지율 + 피드백 메시지
+            score_color = "🟢" if score >= 80 else "🟡" if score >= 60 else "🔴"
+            feedback_text = f"**{score_color} {score:.0f}점, 카메라에 감지된 관절: {coverage}%**\n\n"
+
+            if messages:
+                for fb in messages:
+                    feedback_text += f"{fb}\n\n"
+            else:
+                feedback_text += "🟢 완벽합니다!"
+
+            # 변경시에만 업데이트 (깜박임 최소화)
+            if st.session_state.last_feedback_text != feedback_text:
+                st.session_state.last_feedback_text = feedback_text
+            st.markdown(feedback_text)
+        elif pose_detected and expert_lm:
+            st.info("분석 중...")
+        else:
+            st.info("전신이 보이도록 자세를 취해주세요")
+
+    # feedback_placeholder 대신 직접 렌더링
+    with feedback_placeholder.container():
+        render_feedback()
 
     # ===========================================================================
     # 9. 전문가 영상 처리 버튼 (랜드마크 JSON이 없는 경우)
@@ -6250,7 +6250,7 @@ def show_pose_test_page():
     [데이터 흐름]
     - WebRTC 콜백(video_frame_callback)에서 각 프레임 처리
     - 공유 상태(_webrtc_shared_state['pose_test_page'])에 결과 저장
-    - st_autorefresh(1초)로 UI 업데이트
+    - @st.fragment(run_every=2)로 피드백 영역만 부분 새로고침 (전체 페이지 깜박임 방지)
 
     [기본동작배우기와의 차이점]
     - 기본동작배우기: 특정 동작 학습에 초점, 점수 기반 완료 체크
@@ -6453,12 +6453,11 @@ def show_pose_test_page():
         def video_frame_callback(frame: av.VideoFrame) -> av.VideoFrame:
             """
             WebRTC 스트림의 각 프레임을 처리하는 콜백
-            - 피드백을 영상 위에 직접 오버레이 (깜박임 없음)
+            - 스켈레톤만 그리고, 피드백은 UI에서 표시
             """
             global _last_comparison_time
             img = frame.to_ndarray(format="rgb24")
             img = cv2.flip(img, 1)
-            h, w = img.shape[:2]
 
             try:
                 import time
@@ -6491,33 +6490,8 @@ def show_pose_test_page():
                             update_webrtc_state('pose_test_page', {'pose_detected': True})
                     else:
                         update_webrtc_state('pose_test_page', {'pose_detected': True})
-
-                    # 피드백을 영상 위에 직접 오버레이
-                    state = get_webrtc_state('pose_test_page')
-                    score = state.get('feedback_score', 0)
-                    if score > 0:
-                        # 점수에 따른 색상
-                        if score >= 80:
-                            box_color = (0, 200, 0)
-                        elif score >= 60:
-                            box_color = (0, 200, 255)
-                        else:
-                            box_color = (0, 0, 200)
-
-                        # 반투명 배경 + 점수
-                        overlay = img.copy()
-                        cv2.rectangle(overlay, (10, 10), (180, 70), box_color, -1)
-                        cv2.addWeighted(overlay, 0.7, img, 0.3, 0, img)
-                        cv2.putText(img, f"Score: {score:.0f}", (20, 50),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3)
                 else:
                     update_webrtc_state('pose_test_page', {'pose_detected': False, 'feedback_score': 0})
-                    # 대기 메시지
-                    overlay = img.copy()
-                    cv2.rectangle(overlay, (10, 10), (200, 50), (100, 100, 100), -1)
-                    cv2.addWeighted(overlay, 0.7, img, 0.3, 0, img)
-                    cv2.putText(img, "Waiting...", (20, 40),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
 
                 # 손 감지 (활성화된 경우)
                 if enable_hands and hand_landmarker:
@@ -6551,10 +6525,53 @@ def show_pose_test_page():
         )
 
         # ---------------------------------------------------------------------
-        # 3-2-5. 안내 문구 (점수는 영상 위에 실시간 표시됨)
+        # 3-2-5. 실시간 피드백 표시 (@st.fragment로 부분 새로고침)
         # ---------------------------------------------------------------------
+        # 세션 상태 초기화
+        if 'pose_test_last_feedback_text' not in st.session_state:
+            st.session_state.pose_test_last_feedback_text = ""
+
+        @st.fragment(run_every=2)  # 2초마다 이 영역만 새로고침
+        def render_pose_test_feedback():
+            """피드백 영역만 부분 새로고침 (전체 페이지 깜박임 방지)"""
+            state = get_webrtc_state('pose_test_page')
+            score = state.get('feedback_score', 0)
+            messages = state.get('feedback_messages', [])
+            coverage = state.get('joint_coverage', 0)
+            pose_detected = state.get('pose_detected', False)
+            hands_count = state.get('hands_detected', 0)
+            is_playing = webrtc_ctx.state.playing if webrtc_ctx else False
+
+            if not is_playing:
+                st.info("웹캠을 시작하면 자세 감지가 시작됩니다")
+                return
+
+            # 전문가 비교 활성화된 경우
+            if enable_comparison and selected_expert and score > 0:
+                score_color = "🟢" if score >= 80 else "🟡" if score >= 60 else "🔴"
+                feedback_text = f"**{score_color} {score:.0f}점, 카메라에 감지된 관절: {coverage}%**\n\n"
+
+                if messages:
+                    for fb in messages:
+                        feedback_text += f"{fb}\n\n"
+                else:
+                    feedback_text += "🟢 완벽합니다!"
+
+                if st.session_state.pose_test_last_feedback_text != feedback_text:
+                    st.session_state.pose_test_last_feedback_text = feedback_text
+                st.markdown(feedback_text)
+
+            elif pose_detected:
+                # 자세 감지됨, 비교 비활성화
+                info_text = "🎯 자세 감지됨"
+                if hands_count > 0:
+                    info_text += f" | ✋ 손 {hands_count}개 감지"
+                st.success(info_text)
+            else:
+                st.info("전신이 보이도록 자세를 취해주세요")
+
         with feedback_container:
-            st.info("점수가 영상 위에 실시간으로 표시됩니다")
+            render_pose_test_feedback()
 
         if not webrtc_ctx.state.playing:
             reset_webrtc_state('pose_test_page')
