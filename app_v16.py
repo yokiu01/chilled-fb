@@ -4075,13 +4075,12 @@ def show_action_page():
         def video_frame_callback(frame: av.VideoFrame) -> av.VideoFrame:
             """
             WebRTC 스트림의 각 프레임을 처리하는 콜백
-            - 0.5초마다 자세 비교 수행 (부드러운 피드백)
-            - 점수 평활화로 떨림 방지
-            - 피드백 메시지 안정화로 깜박거림 방지
+            - 피드백을 영상 위에 직접 오버레이 (깜박임 없음)
             """
             global _last_comparison_time
             img = frame.to_ndarray(format="rgb24")
             img = cv2.flip(img, 1)
+            h, w = img.shape[:2]
 
             try:
                 import time
@@ -4093,11 +4092,9 @@ def show_action_page():
 
                 if user_result.pose_landmarks:
                     img = draw_landmarks_on_image(img, user_result, page_key='action_page')
-
-                    # 매 프레임 자세 감지 상태 업데이트
                     update_webrtc_state('action_page', {'pose_detected': True})
 
-                    # 자세 비교는 0.5초에 한 번 (더 부드러운 피드백)
+                    # 자세 비교 (0.5초마다)
                     if current_time - _last_comparison_time['action_page'] >= 0.5:
                         expert_lm = get_expert_landmarks('action_page')
                         if expert_lm:
@@ -4106,15 +4103,7 @@ def show_action_page():
                                 raw_score = comparison_result['overall_score']
                                 raw_feedback = comparison_result['feedback']
 
-                                # 피드백 분석 업데이트 (평활화 + 안정화)
-                                update_feedback_analytics(
-                                    'action_page',
-                                    raw_score,
-                                    raw_feedback,
-                                    current_time
-                                )
-
-                                # 안정화된 결과 가져오기
+                                update_feedback_analytics('action_page', raw_score, raw_feedback, current_time)
                                 analytics = get_feedback_analytics('action_page')
 
                                 update_webrtc_state('action_page', {
@@ -4125,12 +4114,51 @@ def show_action_page():
                                     'score_trend': analytics['score_trend'],
                                     'good_pose_time': analytics['good_pose_time'],
                                 })
-
                                 _last_comparison_time['action_page'] = current_time
                             except Exception as e:
                                 print(f"[ACTION] 비교 오류: {e}")
+
+                    # 피드백을 영상 위에 직접 오버레이
+                    state = get_webrtc_state('action_page')
+                    score = state.get('feedback_score', 0)
+                    if score > 0:
+                        # 점수 배경 박스
+                        if score >= 80:
+                            box_color = (0, 200, 0)  # 초록
+                        elif score >= 60:
+                            box_color = (0, 200, 255)  # 노랑
+                        else:
+                            box_color = (0, 0, 200)  # 빨강
+
+                        # 반투명 배경
+                        overlay = img.copy()
+                        cv2.rectangle(overlay, (10, 10), (180, 70), box_color, -1)
+                        cv2.addWeighted(overlay, 0.7, img, 0.3, 0, img)
+
+                        # 점수 텍스트
+                        cv2.putText(img, f"Score: {score:.0f}", (20, 50),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3)
+
+                        # 피드백 메시지 (하단에 표시)
+                        messages = state.get('feedback_messages', [])
+                        if messages:
+                            # 하단 반투명 배경
+                            overlay2 = img.copy()
+                            cv2.rectangle(overlay2, (0, h-60), (w, h), (0, 0, 0), -1)
+                            cv2.addWeighted(overlay2, 0.5, img, 0.5, 0, img)
+                            # 첫 번째 피드백만 표시 (한글 대신 이모지+영역으로)
+                            fb = messages[0] if messages else ""
+                            # 한글 부분 추출 시도
+                            cv2.putText(img, fb[:30] if len(fb) <= 30 else fb[:30]+"...", (10, h-25),
+                                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
                 else:
                     update_webrtc_state('action_page', {'pose_detected': False})
+                    # "자세를 취해주세요" 메시지
+                    overlay = img.copy()
+                    cv2.rectangle(overlay, (10, 10), (200, 50), (100, 100, 100), -1)
+                    cv2.addWeighted(overlay, 0.7, img, 0.3, 0, img)
+                    cv2.putText(img, "Waiting...", (20, 40),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
 
                 # 손 감지
                 hand_result = user_hand_landmarker.detect_for_video(user_mp_image, timestamp_ms)
@@ -4160,83 +4188,9 @@ def show_action_page():
         )
 
     # ===========================================================================
-    # 8. 실시간 피드백 표시 (전문가 영상 아래 - feedback_placeholder 사용)
+    # 8. 안내 문구 (점수는 영상 위에 실시간 표시됨)
     # ===========================================================================
-    state = get_webrtc_state('action_page')
-    score = state.get('feedback_score', 0)
-    feedback_messages = state.get('feedback_messages', [])
-    coverage = state.get('joint_coverage', 0)
-    pose_detected = state.get('pose_detected', False)
-    score_trend = state.get('score_trend', 'stable')
-    good_pose_time = state.get('good_pose_time', 0)
-    expert_lm = get_expert_landmarks('action_page')
-    is_playing = webrtc_ctx.state.playing if webrtc_ctx else False
-
-    if is_playing:
-        # 리프레시 주기를 2초로 늘려서 깜박임 감소
-        st_autorefresh(interval=2000, key="feedback_refresh")
-
-        # 피드백 카드 스타일 (고정 높이로 레이아웃 안정화)
-        if score > 0:
-            # 점수에 따른 배경색
-            if score >= 80:
-                bg_color, border_color, score_emoji = "#d4edda", "#28a745", "🎯"
-            elif score >= 60:
-                bg_color, border_color, score_emoji = "#fff3cd", "#ffc107", "📈"
-            else:
-                bg_color, border_color, score_emoji = "#f8d7da", "#dc3545", "💪"
-
-            # 추세 아이콘
-            trend_icon = {"up": "↗️", "down": "↘️", "stable": ""}.get(score_trend, "")
-
-            # 자세 유지 시간
-            hold_text = f"유지 {good_pose_time:.0f}초" if good_pose_time >= 1.0 else ""
-
-            # 피드백 메시지 (최대 2개만)
-            fb_html = ""
-            if feedback_messages:
-                for fb in feedback_messages[:2]:
-                    fb_html += f"<div style='font-size:14px;margin:4px 0;'>{fb}</div>"
-            elif score >= 80:
-                fb_html = "<div style='font-size:14px;color:#28a745;'>완벽합니다!</div>"
-
-            # 고정 높이 카드로 깜박임 방지
-            feedback_html = f"""
-            <div style="
-                background:{bg_color};
-                border-left:4px solid {border_color};
-                border-radius:8px;
-                padding:12px 16px;
-                min-height:100px;
-            ">
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-                    <span style="font-size:28px;font-weight:bold;">{score_emoji} {score:.0f}점 {trend_icon}</span>
-                    <span style="font-size:13px;color:#666;">{hold_text}</span>
-                </div>
-                {fb_html}
-            </div>
-            """
-            feedback_placeholder.markdown(feedback_html, unsafe_allow_html=True)
-            st.session_state.comparison_score = score
-
-        elif pose_detected and expert_lm:
-            feedback_placeholder.markdown("""
-            <div style="background:#e3f2fd;border-left:4px solid #2196f3;border-radius:8px;padding:12px 16px;min-height:100px;">
-                <div style="font-size:18px;">⏳ 분석 중...</div>
-            </div>
-            """, unsafe_allow_html=True)
-        else:
-            feedback_placeholder.markdown("""
-            <div style="background:#f5f5f5;border-left:4px solid #9e9e9e;border-radius:8px;padding:12px 16px;min-height:100px;">
-                <div style="font-size:16px;">📷 전신이 보이도록 자세를 취해주세요</div>
-            </div>
-            """, unsafe_allow_html=True)
-    else:
-        feedback_placeholder.markdown("""
-        <div style="background:#f5f5f5;border-left:4px solid #9e9e9e;border-radius:8px;padding:12px 16px;min-height:100px;">
-            <div style="font-size:16px;">▶️ START 버튼을 눌러 카메라를 시작하세요</div>
-        </div>
-        """, unsafe_allow_html=True)
+    feedback_placeholder.info("점수와 피드백이 영상 위에 실시간으로 표시됩니다")
 
     # ===========================================================================
     # 9. 전문가 영상 처리 버튼 (랜드마크 JSON이 없는 경우)
@@ -6499,46 +6453,31 @@ def show_pose_test_page():
         def video_frame_callback(frame: av.VideoFrame) -> av.VideoFrame:
             """
             WebRTC 스트림의 각 프레임을 처리하는 콜백
-
-            [처리 흐름]
-            1. 프레임 → numpy 배열 변환
-            2. 좌우 반전 (거울 모드)
-            3. MediaPipe Pose 감지
-            4. (선택) 스켈레톤 오버레이
-            5. (선택) 전문가 자세와 비교
-            6. (선택) MediaPipe Hands 감지
-            7. 공유 상태 업데이트
+            - 피드백을 영상 위에 직접 오버레이 (깜박임 없음)
             """
             global _last_comparison_time
-            # av.VideoFrame → numpy 배열
             img = frame.to_ndarray(format="rgb24")
-            # 좌우 반전 (거울 효과)
             img = cv2.flip(img, 1)
+            h, w = img.shape[:2]
 
             try:
                 import time
                 current_time = time.time()
-                # MediaPipe VIDEO 모드는 단조 증가하는 타임스탬프 필요
                 timestamp_ms = int(current_time * 1000)
 
-                # MediaPipe Image 생성 및 Pose 감지
                 mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img)
                 pose_result = pose_landmarker.detect_for_video(mp_image, timestamp_ms)
 
-                # 랜드마크 표시가 활성화되고 자세가 감지된 경우
                 if show_landmarks and pose_result.pose_landmarks:
-                    # 스켈레톤 오버레이 그리기 (스무딩 적용)
                     img = draw_landmarks_on_image(img, pose_result, page_key='pose_test_page')
 
-                    # 전문가 자세 비교 (1초 간격으로 - CPU 부하 감소)
+                    # 전문가 자세 비교 (1초 간격)
                     if current_time - _last_comparison_time['pose_test_page'] >= 1.0:
                         expert_lm = get_expert_landmarks('pose_test_page')
                         if expert_lm:
                             try:
-                                # compare_poses(): 관절 각도 비교 → 점수/피드백 계산
                                 comparison_result = compare_poses(pose_result.pose_landmarks[0], expert_lm)
                                 score = comparison_result['overall_score']
-                                # 공유 상태 업데이트 (UI에서 읽어감)
                                 update_webrtc_state('pose_test_page', {
                                     'feedback_score': score,
                                     'feedback_messages': comparison_result['feedback'],
@@ -6549,14 +6488,36 @@ def show_pose_test_page():
                             except Exception as e:
                                 update_webrtc_state('pose_test_page', {'pose_detected': True})
                         else:
-                            # 전문가 랜드마크 없음 - 단순 감지만
                             update_webrtc_state('pose_test_page', {'pose_detected': True})
                     else:
-                        # 비교 대기 중 (1초 미경과)
                         update_webrtc_state('pose_test_page', {'pose_detected': True})
+
+                    # 피드백을 영상 위에 직접 오버레이
+                    state = get_webrtc_state('pose_test_page')
+                    score = state.get('feedback_score', 0)
+                    if score > 0:
+                        # 점수에 따른 색상
+                        if score >= 80:
+                            box_color = (0, 200, 0)
+                        elif score >= 60:
+                            box_color = (0, 200, 255)
+                        else:
+                            box_color = (0, 0, 200)
+
+                        # 반투명 배경 + 점수
+                        overlay = img.copy()
+                        cv2.rectangle(overlay, (10, 10), (180, 70), box_color, -1)
+                        cv2.addWeighted(overlay, 0.7, img, 0.3, 0, img)
+                        cv2.putText(img, f"Score: {score:.0f}", (20, 50),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 1.2, (255, 255, 255), 3)
                 else:
-                    # 자세 감지 안 됨
                     update_webrtc_state('pose_test_page', {'pose_detected': False, 'feedback_score': 0})
+                    # 대기 메시지
+                    overlay = img.copy()
+                    cv2.rectangle(overlay, (10, 10), (200, 50), (100, 100, 100), -1)
+                    cv2.addWeighted(overlay, 0.7, img, 0.3, 0, img)
+                    cv2.putText(img, "Waiting...", (20, 40),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
 
                 # 손 감지 (활성화된 경우)
                 if enable_hands and hand_landmarker:
@@ -6590,72 +6551,12 @@ def show_pose_test_page():
         )
 
         # ---------------------------------------------------------------------
-        # 3-2-5. 피드백 UI 업데이트
+        # 3-2-5. 안내 문구 (점수는 영상 위에 실시간 표시됨)
         # ---------------------------------------------------------------------
-        # WebRTC가 재생 중일 때만 피드백 표시
-        if webrtc_ctx.state.playing:
-            # 리프레시 주기를 2초로 늘려서 깜박임 감소
-            st_autorefresh(interval=2000, key="pose_test_feedback_refresh")
+        with feedback_container:
+            st.info("점수가 영상 위에 실시간으로 표시됩니다")
 
-            # 공유 상태에서 최신 데이터 가져오기
-            state = get_webrtc_state('pose_test_page')
-
-            # 피드백 컨테이너에 결과 표시 (고정 높이 카드 스타일)
-            with feedback_container:
-                if enable_comparison and expert_reference_landmarks:
-                    # 전문가 비교 모드 - 점수와 피드백 표시
-                    score = state.get('feedback_score', 0)
-                    messages = state.get('feedback_messages', [])
-                    joint_coverage = state.get('joint_coverage', 0)
-
-                    # 점수에 따른 스타일
-                    if score >= 80:
-                        bg_color, border_color = "#d4edda", "#28a745"
-                    elif score >= 60:
-                        bg_color, border_color = "#fff3cd", "#ffc107"
-                    elif score > 0:
-                        bg_color, border_color = "#f8d7da", "#dc3545"
-                    else:
-                        bg_color, border_color = "#e3f2fd", "#2196f3"
-
-                    # 피드백 메시지 HTML
-                    fb_html = ""
-                    if messages:
-                        for msg in messages[:2]:
-                            fb_html += f"<div style='font-size:13px;margin:3px 0;color:#555;'>{msg}</div>"
-
-                    # 고정 높이 카드
-                    if score > 0:
-                        st.markdown(f"""
-                        <div style="background:{bg_color};border-left:4px solid {border_color};border-radius:8px;padding:12px;min-height:80px;">
-                            <div style="font-size:22px;font-weight:bold;margin-bottom:6px;">🎯 유사도: {score:.0f}%</div>
-                            <div style="font-size:12px;color:#666;margin-bottom:6px;">감지율: {joint_coverage}%</div>
-                            {fb_html}
-                        </div>
-                        """, unsafe_allow_html=True)
-                    else:
-                        st.markdown(f"""
-                        <div style="background:{bg_color};border-left:4px solid {border_color};border-radius:8px;padding:12px;min-height:80px;">
-                            <div style="font-size:16px;">📊 자세 분석 중...</div>
-                        </div>
-                        """, unsafe_allow_html=True)
-                else:
-                    # 단순 감지 모드 (비교 비활성화)
-                    if state.get('pose_detected', False):
-                        hands_text = f" | ✋ 손 {state['hands_detected']}개" if enable_hands and state.get('hands_detected', 0) > 0 else ""
-                        st.markdown(f"""
-                        <div style="background:#d4edda;border-left:4px solid #28a745;border-radius:8px;padding:12px;min-height:80px;">
-                            <div style="font-size:16px;">✅ 자세 감지 중{hands_text}</div>
-                        </div>
-                        """, unsafe_allow_html=True)
-                    else:
-                        st.markdown("""
-                        <div style="background:#e3f2fd;border-left:4px solid #2196f3;border-radius:8px;padding:12px;min-height:80px;">
-                            <div style="font-size:16px;">📊 자세 분석 중...</div>
-                        </div>
-                        """, unsafe_allow_html=True)
-        else:
-            # WebRTC 중지 시 공유 상태 리셋
+        if not webrtc_ctx.state.playing:
             reset_webrtc_state('pose_test_page')
 
     # ===========================================================================
