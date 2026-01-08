@@ -2484,7 +2484,7 @@ def calculate_angle(point1, point2, point3):
 
 def calculate_joint_angles(landmarks):
     """
-    주요 관절 각도 계산 (visibility 0.3 이상만 포함)
+    주요 관절 각도 계산 (visibility 0.8 이상만 포함)
 
     반환: dict {
         'left_elbow': 각도,
@@ -2501,7 +2501,7 @@ def calculate_joint_angles(landmarks):
         return {}
 
     angles = {}
-    MIN_VISIBILITY = 0.3  # 최소 visibility 임계값 (낮춤)
+    MIN_VISIBILITY = 0.8  # 최소 visibility 임계값 (신뢰도 높은 관절만 사용)
 
     try:
         # 왼쪽 팔꿈치 (어깨11 - 팔꿈치13 - 손목15)
