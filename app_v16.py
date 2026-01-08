@@ -4162,10 +4162,6 @@ def show_action_page():
     # ===========================================================================
     # 8. 실시간 피드백 표시 (전문가 영상 아래 - feedback_placeholder 사용)
     # ===========================================================================
-    # 깜박거림 방지를 위해 마지막 피드백 캐싱
-    if 'last_feedback_content' not in st.session_state:
-        st.session_state.last_feedback_content = ""
-
     state = get_webrtc_state('action_page')
     score = state.get('feedback_score', 0)
     feedback_messages = state.get('feedback_messages', [])
@@ -4177,70 +4173,70 @@ def show_action_page():
     is_playing = webrtc_ctx.state.playing if webrtc_ctx else False
 
     if is_playing:
-        st_autorefresh(interval=500, key="feedback_refresh")
+        # 리프레시 주기를 2초로 늘려서 깜박임 감소
+        st_autorefresh(interval=2000, key="feedback_refresh")
 
-        # 피드백 콘텐츠 구성
+        # 피드백 카드 스타일 (고정 높이로 레이아웃 안정화)
         if score > 0:
-            # 점수 색상 및 아이콘
+            # 점수에 따른 배경색
             if score >= 80:
-                score_color, score_icon = "🟢", "🎯"
+                bg_color, border_color, score_emoji = "#d4edda", "#28a745", "🎯"
             elif score >= 60:
-                score_color, score_icon = "🟡", "📈"
+                bg_color, border_color, score_emoji = "#fff3cd", "#ffc107", "📈"
             else:
-                score_color, score_icon = "🔴", "💪"
+                bg_color, border_color, score_emoji = "#f8d7da", "#dc3545", "💪"
 
             # 추세 아이콘
-            trend_icon = {"up": "↗️", "down": "↘️", "stable": "➡️"}.get(score_trend, "")
+            trend_icon = {"up": "↗️", "down": "↘️", "stable": ""}.get(score_trend, "")
 
-            # 자세 유지 시간 표시
-            if good_pose_time >= 1.0:
-                hold_text = f" | 유지: {good_pose_time:.0f}초"
-            else:
-                hold_text = ""
+            # 자세 유지 시간
+            hold_text = f"유지 {good_pose_time:.0f}초" if good_pose_time >= 1.0 else ""
 
-            # 메인 점수 라인
-            feedback_text = f"**{score_icon} {score:.0f}점 {trend_icon}**{hold_text}\n\n"
-
-            # 감지율이 낮으면 표시
-            if coverage < 80:
-                feedback_text += f"📷 감지율: {coverage}%\n\n"
-
-            # 피드백 메시지 (안정화된 것만 표시)
+            # 피드백 메시지 (최대 2개만)
+            fb_html = ""
             if feedback_messages:
-                for fb in feedback_messages[:3]:
-                    feedback_text += f"{fb}\n\n"
+                for fb in feedback_messages[:2]:
+                    fb_html += f"<div style='font-size:14px;margin:4px 0;'>{fb}</div>"
             elif score >= 80:
-                feedback_text += "완벽합니다!"
+                fb_html = "<div style='font-size:14px;color:#28a745;'>완벽합니다!</div>"
 
-            # 깜박거림 방지: 내용이 변경된 경우에만 업데이트
-            if feedback_text != st.session_state.last_feedback_content:
-                st.session_state.last_feedback_content = feedback_text
-                feedback_placeholder.markdown(feedback_text)
-            else:
-                feedback_placeholder.markdown(feedback_text)
-
+            # 고정 높이 카드로 깜박임 방지
+            feedback_html = f"""
+            <div style="
+                background:{bg_color};
+                border-left:4px solid {border_color};
+                border-radius:8px;
+                padding:12px 16px;
+                min-height:100px;
+            ">
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                    <span style="font-size:28px;font-weight:bold;">{score_emoji} {score:.0f}점 {trend_icon}</span>
+                    <span style="font-size:13px;color:#666;">{hold_text}</span>
+                </div>
+                {fb_html}
+            </div>
+            """
+            feedback_placeholder.markdown(feedback_html, unsafe_allow_html=True)
             st.session_state.comparison_score = score
+
         elif pose_detected and expert_lm:
-            msg = "분석 중..."
-            if msg != st.session_state.last_feedback_content:
-                st.session_state.last_feedback_content = msg
-                feedback_placeholder.info(msg)
-            else:
-                feedback_placeholder.info(msg)
+            feedback_placeholder.markdown("""
+            <div style="background:#e3f2fd;border-left:4px solid #2196f3;border-radius:8px;padding:12px 16px;min-height:100px;">
+                <div style="font-size:18px;">⏳ 분석 중...</div>
+            </div>
+            """, unsafe_allow_html=True)
         else:
-            msg = "전신이 보이도록 자세를 취해주세요"
-            if msg != st.session_state.last_feedback_content:
-                st.session_state.last_feedback_content = msg
-                feedback_placeholder.info(msg)
-            else:
-                feedback_placeholder.info(msg)
+            feedback_placeholder.markdown("""
+            <div style="background:#f5f5f5;border-left:4px solid #9e9e9e;border-radius:8px;padding:12px 16px;min-height:100px;">
+                <div style="font-size:16px;">📷 전신이 보이도록 자세를 취해주세요</div>
+            </div>
+            """, unsafe_allow_html=True)
     else:
-        msg = "START 버튼을 눌러 카메라를 시작하세요"
-        if msg != st.session_state.last_feedback_content:
-            st.session_state.last_feedback_content = msg
-            feedback_placeholder.info(msg)
-        else:
-            feedback_placeholder.info(msg)
+        feedback_placeholder.markdown("""
+        <div style="background:#f5f5f5;border-left:4px solid #9e9e9e;border-radius:8px;padding:12px 16px;min-height:100px;">
+            <div style="font-size:16px;">▶️ START 버튼을 눌러 카메라를 시작하세요</div>
+        </div>
+        """, unsafe_allow_html=True)
 
     # ===========================================================================
     # 9. 전문가 영상 처리 버튼 (랜드마크 JSON이 없는 경우)
@@ -6598,13 +6594,13 @@ def show_pose_test_page():
         # ---------------------------------------------------------------------
         # WebRTC가 재생 중일 때만 피드백 표시
         if webrtc_ctx.state.playing:
-            # st_autorefresh: 1초마다 페이지 새로고침 → 공유 상태를 UI에 반영
-            st_autorefresh(interval=1000, key="pose_test_feedback_refresh")
+            # 리프레시 주기를 2초로 늘려서 깜박임 감소
+            st_autorefresh(interval=2000, key="pose_test_feedback_refresh")
 
             # 공유 상태에서 최신 데이터 가져오기
             state = get_webrtc_state('pose_test_page')
 
-            # 피드백 컨테이너에 결과 표시
+            # 피드백 컨테이너에 결과 표시 (고정 높이 카드 스타일)
             with feedback_container:
                 if enable_comparison and expert_reference_landmarks:
                     # 전문가 비교 모드 - 점수와 피드백 표시
@@ -6612,34 +6608,52 @@ def show_pose_test_page():
                     messages = state.get('feedback_messages', [])
                     joint_coverage = state.get('joint_coverage', 0)
 
-                    # 점수에 따른 색상 구분
+                    # 점수에 따른 스타일
                     if score >= 80:
-                        st.success(f"🎯 유사도: {score:.0f}%")
+                        bg_color, border_color = "#d4edda", "#28a745"
                     elif score >= 60:
-                        st.warning(f"🎯 유사도: {score:.0f}%")
+                        bg_color, border_color = "#fff3cd", "#ffc107"
                     elif score > 0:
-                        st.error(f"🎯 유사도: {score:.0f}%")
+                        bg_color, border_color = "#f8d7da", "#dc3545"
                     else:
-                        st.info("📊 자세 분석 중...")
+                        bg_color, border_color = "#e3f2fd", "#2196f3"
 
-                    # 관절 감지율 프로그레스 바
-                    if joint_coverage > 0:
-                        st.progress(joint_coverage / 100, text=f"관절 감지율: {joint_coverage}%")
-
-                    # 교정 피드백 메시지 (상위 3개)
+                    # 피드백 메시지 HTML
+                    fb_html = ""
                     if messages:
-                        for msg in messages[:3]:
-                            st.caption(msg)
+                        for msg in messages[:2]:
+                            fb_html += f"<div style='font-size:13px;margin:3px 0;color:#555;'>{msg}</div>"
+
+                    # 고정 높이 카드
+                    if score > 0:
+                        st.markdown(f"""
+                        <div style="background:{bg_color};border-left:4px solid {border_color};border-radius:8px;padding:12px;min-height:80px;">
+                            <div style="font-size:22px;font-weight:bold;margin-bottom:6px;">🎯 유사도: {score:.0f}%</div>
+                            <div style="font-size:12px;color:#666;margin-bottom:6px;">감지율: {joint_coverage}%</div>
+                            {fb_html}
+                        </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        st.markdown(f"""
+                        <div style="background:{bg_color};border-left:4px solid {border_color};border-radius:8px;padding:12px;min-height:80px;">
+                            <div style="font-size:16px;">📊 자세 분석 중...</div>
+                        </div>
+                        """, unsafe_allow_html=True)
                 else:
                     # 단순 감지 모드 (비교 비활성화)
                     if state.get('pose_detected', False):
-                        st.success("✅ 자세 감지 중")
+                        hands_text = f" | ✋ 손 {state['hands_detected']}개" if enable_hands and state.get('hands_detected', 0) > 0 else ""
+                        st.markdown(f"""
+                        <div style="background:#d4edda;border-left:4px solid #28a745;border-radius:8px;padding:12px;min-height:80px;">
+                            <div style="font-size:16px;">✅ 자세 감지 중{hands_text}</div>
+                        </div>
+                        """, unsafe_allow_html=True)
                     else:
-                        st.info("📊 자세 분석 중...")
-
-                    # 손 감지 정보 표시
-                    if enable_hands and state.get('hands_detected', 0) > 0:
-                        st.info(f"✋ 손 감지: {state['hands_detected']}개")
+                        st.markdown("""
+                        <div style="background:#e3f2fd;border-left:4px solid #2196f3;border-radius:8px;padding:12px;min-height:80px;">
+                            <div style="font-size:16px;">📊 자세 분석 중...</div>
+                        </div>
+                        """, unsafe_allow_html=True)
         else:
             # WebRTC 중지 시 공유 상태 리셋
             reset_webrtc_state('pose_test_page')
