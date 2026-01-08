@@ -88,6 +88,17 @@ def _get_last_comparison_time():
     }
 
 @st.cache_resource
+def _get_landmark_smoother():
+    """랜드마크 스무딩을 위한 저장소 (떨림 방지)"""
+    return {
+        'action_page': {'prev_landmarks': None},
+        'pose_test_page': {'prev_landmarks': None}
+    }
+
+# 랜드마크 스무딩 상수
+LANDMARK_SMOOTHING_FACTOR = 0.4  # 0에 가까울수록 이전 프레임 영향 큼 (떨림 감소), 1에 가까울수록 현재 프레임 우선 (반응성 증가)
+
+@st.cache_resource
 def _get_feedback_analytics():
     """
     피드백 분석을 위한 데이터 저장소
@@ -107,6 +118,8 @@ def _get_feedback_analytics():
             'good_pose_start': None,           # 좋은 자세(80+) 시작 시간
             'smoothed_score': 0,               # 평활화된 점수
             'stable_feedback': [],             # 안정화된 피드백
+            'displayed_feedback': [],          # 현재 표시 중인 피드백 (3초마다 업데이트)
+            'last_feedback_msg_time': 0,       # 마지막 피드백 메시지 업데이트 시간
             'score_trend': 'stable',           # 점수 추세
             'pose_lost_time': None,            # 자세 감지 실패 시작 시간
             'last_update_time': 0,             # 마지막 업데이트 시간
@@ -118,6 +131,8 @@ def _get_feedback_analytics():
             'good_pose_start': None,
             'smoothed_score': 0,
             'stable_feedback': [],
+            'displayed_feedback': [],          # 현재 표시 중인 피드백 (3초마다 업데이트)
+            'last_feedback_msg_time': 0,       # 마지막 피드백 메시지 업데이트 시간
             'score_trend': 'stable',
             'pose_lost_time': None,
             'last_update_time': 0,
@@ -131,6 +146,7 @@ _webrtc_shared_state = _get_webrtc_shared_state()
 _expert_landmarks_store = _get_expert_landmarks_store()
 _last_comparison_time = _get_last_comparison_time()
 _feedback_analytics = _get_feedback_analytics()
+_landmark_smoother = _get_landmark_smoother()
 
 def set_expert_landmarks(page_key, landmarks):
     """전문가 랜드마크를 공유 저장소에 설정"""
@@ -141,6 +157,83 @@ def get_expert_landmarks(page_key):
     """공유 저장소에서 전문가 랜드마크 가져오기"""
     with _webrtc_state_lock:
         return _expert_landmarks_store.get(page_key)
+
+def smooth_landmarks(page_key, current_landmarks):
+    """
+    랜드마크에 저역 통과 필터(EMA)를 적용하여 떨림 감소
+
+    Args:
+        page_key: 페이지 키
+        current_landmarks: 현재 프레임의 랜드마크 리스트 (pose_landmarks)
+
+    Returns:
+        스무딩된 랜드마크 리스트
+    """
+    if not current_landmarks:
+        return current_landmarks
+
+    with _webrtc_state_lock:
+        smoother = _landmark_smoother[page_key]
+        prev = smoother['prev_landmarks']
+
+        # 첫 프레임이거나 이전 랜드마크가 없으면 현재 값 그대로 사용
+        if prev is None or len(prev) == 0:
+            # 깊은 복사하여 저장
+            smoother['prev_landmarks'] = [
+                [(lm.x, lm.y, lm.z, lm.visibility) for lm in person_landmarks]
+                for person_landmarks in current_landmarks
+            ]
+            return current_landmarks
+
+        # 사람 수가 다르면 현재 값 사용하고 갱신
+        if len(prev) != len(current_landmarks):
+            smoother['prev_landmarks'] = [
+                [(lm.x, lm.y, lm.z, lm.visibility) for lm in person_landmarks]
+                for person_landmarks in current_landmarks
+            ]
+            return current_landmarks
+
+        alpha = LANDMARK_SMOOTHING_FACTOR
+        smoothed_all = []
+        new_prev = []
+
+        for person_idx, person_landmarks in enumerate(current_landmarks):
+            prev_person = prev[person_idx]
+
+            # 랜드마크 수가 다르면 현재 값 사용
+            if len(prev_person) != len(person_landmarks):
+                smoothed_all.append(person_landmarks)
+                new_prev.append([(lm.x, lm.y, lm.z, lm.visibility) for lm in person_landmarks])
+                continue
+
+            smoothed_person = []
+            person_prev_new = []
+
+            for lm_idx, lm in enumerate(person_landmarks):
+                px, py, pz, pv = prev_person[lm_idx]
+
+                # EMA 스무딩: new = alpha * current + (1 - alpha) * previous
+                sx = alpha * lm.x + (1 - alpha) * px
+                sy = alpha * lm.y + (1 - alpha) * py
+                sz = alpha * lm.z + (1 - alpha) * pz
+                sv = lm.visibility  # visibility는 스무딩 안 함
+
+                # 스무딩된 랜드마크 객체 생성 (SimpleNamespace로 대체)
+                from types import SimpleNamespace
+                smoothed_lm = SimpleNamespace(x=sx, y=sy, z=sz, visibility=sv)
+                smoothed_person.append(smoothed_lm)
+                person_prev_new.append((sx, sy, sz, sv))
+
+            smoothed_all.append(smoothed_person)
+            new_prev.append(person_prev_new)
+
+        smoother['prev_landmarks'] = new_prev
+        return smoothed_all
+
+def reset_landmark_smoother(page_key):
+    """랜드마크 스무딩 상태 초기화"""
+    with _webrtc_state_lock:
+        _landmark_smoother[page_key]['prev_landmarks'] = None
 
 def get_webrtc_state(page_key):
     with _webrtc_state_lock:
@@ -235,10 +328,16 @@ def update_feedback_analytics(page_key, raw_score, raw_feedback, current_time):
         else:
             analytics['good_pose_start'] = None
 
-        # 6. 결과 저장
+        # 6. 결과 저장 - 점수는 매번 업데이트
         analytics['smoothed_score'] = smoothed
         analytics['stable_feedback'] = stable_feedback
         analytics['last_update_time'] = current_time
+
+        # 7. 피드백 메시지는 3초에 한 번만 업데이트 (깜박임 방지)
+        FEEDBACK_UPDATE_INTERVAL = 3.0  # 초
+        if current_time - analytics['last_feedback_msg_time'] >= FEEDBACK_UPDATE_INTERVAL:
+            analytics['displayed_feedback'] = stable_feedback.copy()
+            analytics['last_feedback_msg_time'] = current_time
 
 def get_feedback_analytics(page_key):
     """안정화된 피드백 분석 결과 가져오기"""
@@ -246,7 +345,7 @@ def get_feedback_analytics(page_key):
         analytics = _feedback_analytics[page_key]
         return {
             'smoothed_score': analytics['smoothed_score'],
-            'stable_feedback': analytics['stable_feedback'].copy(),
+            'stable_feedback': analytics['displayed_feedback'].copy(),  # 3초마다 업데이트되는 피드백 사용
             'score_trend': analytics['score_trend'],
             'good_pose_time': analytics['total_good_time'],
             'last_update_time': analytics['last_update_time'],
@@ -262,6 +361,8 @@ def reset_feedback_analytics(page_key):
             'good_pose_start': None,
             'smoothed_score': 0,
             'stable_feedback': [],
+            'displayed_feedback': [],          # 현재 표시 중인 피드백 (3초마다 업데이트)
+            'last_feedback_msg_time': 0,       # 마지막 피드백 메시지 업데이트 시간
             'score_trend': 'stable',
             'pose_lost_time': None,
             'last_update_time': 0,
@@ -3991,7 +4092,7 @@ def show_action_page():
                 user_result = user_pose_landmarker.detect_for_video(user_mp_image, timestamp_ms)
 
                 if user_result.pose_landmarks:
-                    img = draw_landmarks_on_image(img, user_result)
+                    img = draw_landmarks_on_image(img, user_result, page_key='action_page')
 
                     # 매 프레임 자세 감지 상태 업데이트
                     update_webrtc_state('action_page', {'pose_detected': True})
@@ -5902,13 +6003,25 @@ def show_org_statistics_page():
 # ==================== 동작 테스트 페이지 ====================
 
 # MediaPipe 랜드마크 그리기 헬퍼 함수
-def draw_landmarks_on_image(rgb_image, detection_result):
-    """MediaPipe Pose 랜드마크를 이미지에 그리기"""
+def draw_landmarks_on_image(rgb_image, detection_result, page_key=None, apply_smoothing=True):
+    """
+    MediaPipe Pose 랜드마크를 이미지에 그리기
+
+    Args:
+        rgb_image: RGB 이미지
+        detection_result: MediaPipe 감지 결과
+        page_key: 페이지 키 (스무딩 적용 시 필요)
+        apply_smoothing: 스무딩 적용 여부 (기본 True)
+    """
     pose_landmarks_list = detection_result.pose_landmarks
     annotated_image = np.copy(rgb_image)
 
     if not pose_landmarks_list:
         return annotated_image
+
+    # 스무딩 적용 (page_key가 있고 apply_smoothing이 True인 경우)
+    if page_key and apply_smoothing:
+        pose_landmarks_list = smooth_landmarks(page_key, pose_landmarks_list)
 
     height, width, _ = annotated_image.shape
 
@@ -6075,9 +6188,9 @@ def process_expert_video_with_skeleton(expert_video_path):
                 'hand_landmarks': None
             }
 
-            # Pose 랜드마크 그리기 및 저장
+            # Pose 랜드마크 그리기 및 저장 (전문가 영상은 스무딩 불필요)
             if pose_result.pose_landmarks:
-                frame_rgb = draw_landmarks_on_image(frame_rgb, pose_result)
+                frame_rgb = draw_landmarks_on_image(frame_rgb, pose_result, apply_smoothing=False)
                 # 랜드마크를 직렬화 가능한 형태로 변환
                 landmarks = pose_result.pose_landmarks[0]
                 frame_data['pose_landmarks'] = [
@@ -6418,8 +6531,8 @@ def show_pose_test_page():
 
                 # 랜드마크 표시가 활성화되고 자세가 감지된 경우
                 if show_landmarks and pose_result.pose_landmarks:
-                    # 스켈레톤 오버레이 그리기
-                    img = draw_landmarks_on_image(img, pose_result)
+                    # 스켈레톤 오버레이 그리기 (스무딩 적용)
+                    img = draw_landmarks_on_image(img, pose_result, page_key='pose_test_page')
 
                     # 전문가 자세 비교 (1초 간격으로 - CPU 부하 감소)
                     if current_time - _last_comparison_time['pose_test_page'] >= 1.0:
