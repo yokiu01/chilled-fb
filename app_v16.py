@@ -36,22 +36,124 @@ from streamlit_autorefresh import st_autorefresh
 import threading
 
 # =============================================================================
-# WebRTC 공유 상태 (모듈 레벨 - 리렌더링 간 유지)
+# WebRTC 공유 상태 (st.cache_resource로 리렌더링/모듈 재로드 간 유지)
 # =============================================================================
-_webrtc_state_lock = threading.Lock()
-_webrtc_shared_state = {
-    'action_page': {'timestamp_ms': 0, 'feedback_score': 0, 'feedback_messages': [], 'joint_coverage': 0, 'pose_detected': False},
-    'pose_test_page': {'timestamp_ms': 0, 'feedback_score': 0, 'feedback_messages': [], 'joint_coverage': 0, 'pose_detected': False, 'hands_detected': 0}
-}
+# ⚠️ 주의사항:
+#   1. 반드시 @st.cache_resource를 사용해야 함
+#      - Streamlit은 st_autorefresh나 사용자 상호작용 시 전체 스크립트를 재실행
+#      - 모듈 레벨 변수만 사용하면 모듈 재로드 시 초기화되어 상태가 유실됨
+#      - @st.cache_resource는 Streamlit 프로세스가 살아있는 한 동일 인스턴스 유지
+#
+#   2. WebRTC 콜백은 별도 스레드에서 실행됨
+#      - st.session_state 직접 접근 불가 (Streamlit 컨텍스트 없음)
+#      - 반드시 이 공유 상태를 통해 데이터를 전달해야 함
+#      - threading.Lock으로 동시 접근 보호 필수
+#
+#   3. UI 갱신은 st_autorefresh로 처리
+#      - 콜백에서 update_webrtc_state() 호출 → 공유 상태 업데이트
+#      - UI에서 get_webrtc_state()로 읽어서 표시
+#      - st_autorefresh가 주기적으로 페이지를 리렌더링하여 최신 상태 반영
+#
+#   4. 상태 초기화가 필요한 경우
+#      - st.cache_resource.clear()를 호출하면 모든 캐시가 초기화됨
+#      - 또는 reset_webrtc_state()로 특정 페이지 상태만 초기화
+# =============================================================================
+@st.cache_resource
+def _get_webrtc_state_lock():
+    """스레드 락을 캐시하여 모듈 재로드 시에도 동일 인스턴스 유지"""
+    return threading.Lock()
+
+@st.cache_resource
+def _get_webrtc_shared_state():
+    """공유 상태 딕셔너리를 캐시하여 WebRTC 콜백과 UI 간 동기화"""
+    return {
+        'action_page': {'timestamp_ms': 0, 'feedback_score': 0, 'feedback_messages': [], 'joint_coverage': 0, 'pose_detected': False},
+        'pose_test_page': {'timestamp_ms': 0, 'feedback_score': 0, 'feedback_messages': [], 'joint_coverage': 0, 'pose_detected': False, 'hands_detected': 0}
+    }
+
+@st.cache_resource
+def _get_expert_landmarks_store():
+    """전문가 랜드마크 저장소를 캐시"""
+    return {
+        'action_page': None,
+        'pose_test_page': None
+    }
+
+@st.cache_resource
+def _get_last_comparison_time():
+    """마지막 비교 시간을 캐시 (1초 간격 제한용)"""
+    return {
+        'action_page': 0,
+        'pose_test_page': 0
+    }
+
+@st.cache_resource
+def _get_feedback_analytics():
+    """
+    피드백 분석을 위한 데이터 저장소
+    - score_history: 최근 점수들 (이동 평균 계산용)
+    - feedback_counter: 피드백 메시지 빈도 (안정화용)
+    - good_pose_start: 좋은 자세 시작 시간 (유지 시간 추적용)
+    - smoothed_score: 평활화된 점수
+    - stable_feedback: 안정화된 피드백 메시지
+    - score_trend: 점수 추세 (up/down/stable)
+    - pose_lost_time: 자세 감지 실패 시작 시간
+    """
+    from collections import deque, Counter
+    return {
+        'action_page': {
+            'score_history': deque(maxlen=8),  # 최근 8개 점수 저장
+            'feedback_counter': Counter(),     # 피드백 빈도 카운터
+            'good_pose_start': None,           # 좋은 자세(80+) 시작 시간
+            'smoothed_score': 0,               # 평활화된 점수
+            'stable_feedback': [],             # 안정화된 피드백
+            'score_trend': 'stable',           # 점수 추세
+            'pose_lost_time': None,            # 자세 감지 실패 시작 시간
+            'last_update_time': 0,             # 마지막 업데이트 시간
+            'total_good_time': 0,              # 누적 좋은 자세 시간
+        },
+        'pose_test_page': {
+            'score_history': deque(maxlen=8),
+            'feedback_counter': Counter(),
+            'good_pose_start': None,
+            'smoothed_score': 0,
+            'stable_feedback': [],
+            'score_trend': 'stable',
+            'pose_lost_time': None,
+            'last_update_time': 0,
+            'total_good_time': 0,
+        }
+    }
+
+# 캐시된 공유 상태 참조 (모듈 재로드 시에도 동일 인스턴스)
+_webrtc_state_lock = _get_webrtc_state_lock()
+_webrtc_shared_state = _get_webrtc_shared_state()
+_expert_landmarks_store = _get_expert_landmarks_store()
+_last_comparison_time = _get_last_comparison_time()
+_feedback_analytics = _get_feedback_analytics()
+
+def set_expert_landmarks(page_key, landmarks):
+    """전문가 랜드마크를 공유 저장소에 설정"""
+    with _webrtc_state_lock:
+        _expert_landmarks_store[page_key] = landmarks
+
+def get_expert_landmarks(page_key):
+    """공유 저장소에서 전문가 랜드마크 가져오기"""
+    with _webrtc_state_lock:
+        return _expert_landmarks_store.get(page_key)
 
 def get_webrtc_state(page_key):
     with _webrtc_state_lock:
-        return _webrtc_shared_state.get(page_key, {}).copy()
+        state = _webrtc_shared_state.get(page_key, {}).copy()
+        return state
 
 def update_webrtc_state(page_key, updates):
     with _webrtc_state_lock:
         if page_key in _webrtc_shared_state:
             _webrtc_shared_state[page_key].update(updates)
+            # 디버깅: score나 pose_detected가 업데이트될 때 로그
+            if 'feedback_score' in updates or 'pose_detected' in updates:
+                print(f"[STATE] {page_key} 업데이트: {updates}")
 
 def reset_webrtc_state(page_key):
     with _webrtc_state_lock:
@@ -59,6 +161,112 @@ def reset_webrtc_state(page_key):
             _webrtc_shared_state[page_key] = {'timestamp_ms': 0, 'feedback_score': 0, 'feedback_messages': [], 'joint_coverage': 0, 'pose_detected': False}
         elif page_key == 'pose_test_page':
             _webrtc_shared_state[page_key] = {'timestamp_ms': 0, 'feedback_score': 0, 'feedback_messages': [], 'joint_coverage': 0, 'pose_detected': False, 'hands_detected': 0}
+
+# =============================================================================
+# 피드백 분석 유틸리티 함수들
+# =============================================================================
+def update_feedback_analytics(page_key, raw_score, raw_feedback, current_time):
+    """
+    원시 점수와 피드백을 받아서 평활화하고 안정화된 피드백을 생성
+
+    Args:
+        page_key: 페이지 키 ('action_page' 또는 'pose_test_page')
+        raw_score: 현재 프레임의 원시 점수
+        raw_feedback: 현재 프레임의 원시 피드백 메시지 리스트
+        current_time: 현재 시간 (time.time())
+    """
+    with _webrtc_state_lock:
+        analytics = _feedback_analytics[page_key]
+
+        # 1. 점수 히스토리에 추가
+        analytics['score_history'].append(raw_score)
+
+        # 2. 이동 평균으로 점수 평활화 (최근 점수에 더 높은 가중치)
+        history = list(analytics['score_history'])
+        if len(history) >= 3:
+            # 가중 이동 평균: 최신 점수에 더 높은 가중치
+            weights = [1, 1, 2, 2, 3, 3, 4, 4][:len(history)]
+            weighted_sum = sum(s * w for s, w in zip(history, weights))
+            smoothed = weighted_sum / sum(weights)
+        else:
+            smoothed = raw_score
+
+        # 3. 점수 추세 계산
+        if len(history) >= 4:
+            recent_avg = sum(history[-2:]) / 2
+            older_avg = sum(history[-4:-2]) / 2
+            diff = recent_avg - older_avg
+            if diff > 5:
+                analytics['score_trend'] = 'up'
+            elif diff < -5:
+                analytics['score_trend'] = 'down'
+            else:
+                analytics['score_trend'] = 'stable'
+
+        # 4. 피드백 메시지 안정화 (빈도 기반)
+        # 새 피드백들의 빈도 증가
+        for fb in raw_feedback:
+            analytics['feedback_counter'][fb] += 1
+
+        # 오래된 피드백 빈도 감소 (decay)
+        to_remove = []
+        for fb in analytics['feedback_counter']:
+            if fb not in raw_feedback:
+                analytics['feedback_counter'][fb] -= 0.5
+                if analytics['feedback_counter'][fb] <= 0:
+                    to_remove.append(fb)
+        for fb in to_remove:
+            del analytics['feedback_counter'][fb]
+
+        # 빈도가 2 이상인 피드백만 안정적으로 표시
+        stable_feedback = [
+            fb for fb, count in analytics['feedback_counter'].most_common(3)
+            if count >= 2
+        ]
+
+        # 5. 좋은 자세 유지 시간 추적
+        GOOD_SCORE_THRESHOLD = 80
+        if smoothed >= GOOD_SCORE_THRESHOLD:
+            if analytics['good_pose_start'] is None:
+                analytics['good_pose_start'] = current_time
+            # 누적 시간 업데이트
+            elapsed = current_time - analytics['good_pose_start']
+            analytics['total_good_time'] = elapsed
+        else:
+            analytics['good_pose_start'] = None
+
+        # 6. 결과 저장
+        analytics['smoothed_score'] = smoothed
+        analytics['stable_feedback'] = stable_feedback
+        analytics['last_update_time'] = current_time
+
+def get_feedback_analytics(page_key):
+    """안정화된 피드백 분석 결과 가져오기"""
+    with _webrtc_state_lock:
+        analytics = _feedback_analytics[page_key]
+        return {
+            'smoothed_score': analytics['smoothed_score'],
+            'stable_feedback': analytics['stable_feedback'].copy(),
+            'score_trend': analytics['score_trend'],
+            'good_pose_time': analytics['total_good_time'],
+            'last_update_time': analytics['last_update_time'],
+        }
+
+def reset_feedback_analytics(page_key):
+    """피드백 분석 상태 초기화"""
+    from collections import deque, Counter
+    with _webrtc_state_lock:
+        _feedback_analytics[page_key] = {
+            'score_history': deque(maxlen=8),
+            'feedback_counter': Counter(),
+            'good_pose_start': None,
+            'smoothed_score': 0,
+            'stable_feedback': [],
+            'score_trend': 'stable',
+            'pose_lost_time': None,
+            'last_update_time': 0,
+            'total_good_time': 0,
+        }
 
 @st.cache_resource
 def get_pose_landmarker(detection_conf=0.5, tracking_conf=0.5):
@@ -3592,23 +3800,60 @@ def show_action_select_page():
 
 def show_action_page():
     """
-    기본 동작 배우기 페이지 (WebRTC 기반)
-    - 전문가 영상: st.video()로 재생 (스켈레톤은 미리 처리된 영상 사용)
-    - 사용자 카메라: WebRTC로 브라우저 카메라 접근 (Streamlit Cloud 호환)
-    - 자세 비교: 미리 추출된 전문가 랜드마크와 비교
+    ================================================================================
+    기본 동작 배우기 페이지 (WebRTC 기반 실시간 자세 비교)
+    ================================================================================
+
+    [아키텍처 개요]
+    이 페이지는 전문가의 춤 동작을 사용자가 따라하며 실시간 피드백을 받는 기능을 제공합니다.
+
+    1. 전문가 영상 재생 (col1)
+       - st.video()로 전문가 영상 재생 (스켈레톤 오버레이된 영상 사용)
+       - 미리 처리된 스켈레톤 영상이 없으면 원본 영상 재생
+
+    2. 사용자 웹캠 (col2)
+       - streamlit-webrtc를 사용하여 브라우저 카메라에 접근
+       - cv2.VideoCapture는 서버에서 실행되므로 클라우드 환경에서 작동 안 함
+       - WebRTC는 브라우저의 getUserMedia API를 사용
+
+    3. 실시간 자세 비교
+       - MediaPipe Pose로 사용자 스켈레톤 추출
+       - 미리 추출된 전문가 랜드마크 JSON과 비교
+       - compare_poses() 함수로 관절 각도 비교 후 점수/피드백 생성
+
+    [데이터 흐름]
+    - WebRTC 비디오 프레임 콜백(video_frame_callback)은 별도 스레드에서 실행
+    - 콜백에서 update_webrtc_state()로 공유 상태(_webrtc_shared_state) 업데이트
+    - st_autorefresh가 0.5초마다 페이지를 새로고침하여 공유 상태를 UI에 반영
+    - 점수/피드백은 columns 밖의 독립적인 영역에 표시
+
+    [파일 구조]
+    - 전문가 영상: videos/{action['video_file']}
+    - 스켈레톤 처리 영상: videos/processed/skeleton_{video_file}
+    - 전문가 랜드마크: data/expert_landmarks/{video_name}_landmarks.json
+    ================================================================================
     """
-    # 현재 언어에 맞는 기본 동작 가져오기
+
+    # ===========================================================================
+    # 1. 현재 동작 정보 로드 및 진행 상태 확인
+    # ===========================================================================
+    # 현재 언어에 맞는 기본 동작 가져오기 (한국어/영어 지원)
     basic_actions = get_basic_actions(st.session_state.language)
 
+    # 모든 동작을 완료했으면 밈 카드 생성 페이지로 이동
     if st.session_state.current_action >= len(basic_actions):
         st.session_state.current_step = 'meme'
         st.rerun()
         return
 
+    # 현재 학습 중인 동작 정보
     action = basic_actions[st.session_state.current_action]
+    # 진행률 계산 (0.0 ~ 1.0)
     progress = (st.session_state.current_action + 1) / len(basic_actions)
 
-    # 헤더
+    # ===========================================================================
+    # 2. 페이지 헤더 UI (이전/다음 네비게이션, 진행 바)
+    # ===========================================================================
     col1, col2, col3 = st.columns([1, 4, 1])
     with col1:
         if st.button(t('btn_prev')):
@@ -3627,7 +3872,9 @@ def show_action_page():
             st.session_state.current_step = 'landing'
             st.rerun()
 
-    # 동작 설명
+    # ===========================================================================
+    # 3. 동작 설명 카드 (스토리 카드와 역사적 배경)
+    # ===========================================================================
     st.markdown(f"""
     <div class='action-card'>
         <h3>{action['description']}</h3>
@@ -3636,63 +3883,109 @@ def show_action_page():
     </div>
     """, unsafe_allow_html=True)
 
-    # 세션 상태 초기화
+    # ===========================================================================
+    # 4. 세션 상태 초기화
+    # ===========================================================================
+    # st.session_state는 Streamlit 재실행 간에 데이터를 유지
+    # 반면 _webrtc_shared_state는 모듈 레벨 전역 변수로 WebRTC 콜백과 공유
     if 'action_webcam_running' not in st.session_state:
-        st.session_state.action_webcam_running = False
+        st.session_state.action_webcam_running = False  # 웹캠 활성화 상태
     if 'comparison_score' not in st.session_state:
-        st.session_state.comparison_score = 0
+        st.session_state.comparison_score = 0  # 마지막 비교 점수 (0-100)
     if 'comparison_feedback' not in st.session_state:
-        st.session_state.comparison_feedback = []
+        st.session_state.comparison_feedback = []  # 피드백 메시지 리스트
     if 'joint_coverage_percent' not in st.session_state:
-        st.session_state.joint_coverage_percent = 0
+        st.session_state.joint_coverage_percent = 0  # 감지된 관절 비율
 
-    # 영상 파일 경로
+    # ===========================================================================
+    # 5. 파일 경로 설정
+    # ===========================================================================
+    # 원본 전문가 영상 경로
     video_path = f"videos/{action['video_file']}"
     video_filename = action['video_file']
+    # 확장자를 제외한 파일명 (랜드마크 JSON 파일명과 매칭용)
     video_name = os.path.splitext(os.path.basename(video_filename))[0]
 
-    # 전문가 랜드마크 JSON 경로
+    # 전문가 랜드마크 JSON 경로 (process_expert_video_with_skeleton으로 생성됨)
     landmarks_json_path = f"data/expert_landmarks/{video_name}_landmarks.json"
+    # 스켈레톤 오버레이된 전문가 영상 경로
     processed_video_path = f"videos/processed/skeleton_{video_filename}"
 
-    # 전문가 랜드마크 로드 (미리 처리된 경우)
+    # ===========================================================================
+    # 6. 전문가 랜드마크 로드 (자세 비교용)
+    # ===========================================================================
     expert_reference_landmarks = None
+
+    # 디버깅: 경로 확인
+    print(f"[DEBUG] landmarks_json_path: {landmarks_json_path}")
+    print(f"[DEBUG] 파일 존재 여부: {os.path.exists(landmarks_json_path)}")
+
     if os.path.exists(landmarks_json_path):
         expert_reference_landmarks = load_expert_landmarks(landmarks_json_path)
         if expert_reference_landmarks:
-            st.success(f"✅ 전문가 자세 데이터 로드 완료 - 실시간 비교 가능")
+            set_expert_landmarks('action_page', expert_reference_landmarks)
+            print(f"[DEBUG] 전문가 랜드마크 로드 성공: {len(expert_reference_landmarks)}개")
+        else:
+            st.warning(f"⚠️ 랜드마크 파일은 있지만 데이터가 없습니다: {landmarks_json_path}")
+    else:
+        st.warning(f"⚠️ 전문가 랜드마크 파일 없음: {landmarks_json_path}")
 
-    # 2열 레이아웃: 전문가 | 사용자
+    # ===========================================================================
+    # 7. 2열 레이아웃 UI (전문가 영상 | 사용자 웹캠)
+    # ===========================================================================
     col1, col2 = st.columns(2)
 
+    # -------------------------------------------------------------------------
+    # 7-1. 왼쪽 컬럼: 전문가 시범 영상 + 피드백 표시
+    # -------------------------------------------------------------------------
     with col1:
         st.markdown(f"#### {t('expert_demo')}")
-        # 전문가 영상 표시 (스켈레톤 처리된 영상 또는 원본)
+        # 스켈레톤 오버레이된 영상이 있으면 우선 사용 (학습에 더 효과적)
         if os.path.exists(processed_video_path):
             st.video(processed_video_path, loop=True, autoplay=True, muted=True)
         elif os.path.exists(video_path):
+            # 원본 영상 재생
             st.video(video_path, loop=True, autoplay=True, muted=True)
         else:
             st.info(f"{action['name']} 시범 영상 - 업로드 예정")
-
-        # 피드백 표시 영역
+        # 피드백 표시 영역 (전문가 영상 아래)
         feedback_placeholder = st.empty()
 
+    # -------------------------------------------------------------------------
+    # 7-2. 오른쪽 컬럼: 사용자 웹캠 (WebRTC 기반)
+    # -------------------------------------------------------------------------
     with col2:
         st.markdown(f"#### {t('your_movement')}")
 
-        # 캐시된 MediaPipe 사용
+        # MediaPipe 모델 가져오기 (@st.cache_resource로 캐시됨)
+        # - Pose Landmarker: 33개 신체 랜드마크 감지
+        # - Hand Landmarker: 21개 손 랜드마크 감지 (선택적)
         user_pose_landmarker = get_pose_landmarker(0.5, 0.5)
         user_hand_landmarker = get_hand_landmarker(0.5, 0.5)
 
+        # ---------------------------------------------------------------------
         # WebRTC 비디오 프레임 콜백 함수
+        # ---------------------------------------------------------------------
+        # 주의: 이 함수는 별도의 스레드에서 실행됨!
+        # - st.session_state에 직접 접근 불가 (Streamlit 컨텍스트 없음)
+        # - 대신 모듈 레벨 전역 변수(_webrtc_shared_state)를 통해 데이터 공유
+        # - update_webrtc_state()로 상태 업데이트 → UI는 st_autorefresh로 반영
+        # - update_feedback_analytics()로 점수 평활화 및 피드백 안정화
         def video_frame_callback(frame: av.VideoFrame) -> av.VideoFrame:
+            """
+            WebRTC 스트림의 각 프레임을 처리하는 콜백
+            - 0.5초마다 자세 비교 수행 (부드러운 피드백)
+            - 점수 평활화로 떨림 방지
+            - 피드백 메시지 안정화로 깜박거림 방지
+            """
+            global _last_comparison_time
             img = frame.to_ndarray(format="rgb24")
             img = cv2.flip(img, 1)
 
             try:
                 import time
-                timestamp_ms = int(time.time() * 1000)
+                current_time = time.time()
+                timestamp_ms = int(current_time * 1000)
 
                 user_mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img)
                 user_result = user_pose_landmarker.detect_for_video(user_mp_image, timestamp_ms)
@@ -3700,40 +3993,62 @@ def show_action_page():
                 if user_result.pose_landmarks:
                     img = draw_landmarks_on_image(img, user_result)
 
-                    if expert_reference_landmarks:
-                        try:
-                            comparison_result = compare_poses(user_result.pose_landmarks[0], expert_reference_landmarks)
-                            score = comparison_result['overall_score']
-                            color = (0, 255, 0) if score >= 80 else (255, 165, 0) if score >= 60 else (255, 0, 0)
-                            cv2.putText(img, f'Score: {score}%', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
-                            update_webrtc_state('action_page', {
-                                'feedback_score': score,
-                                'feedback_messages': comparison_result['feedback'],
-                                'joint_coverage': comparison_result.get('joint_coverage_percent', 100),
-                                'pose_detected': True,
-                                                            })
-                        except Exception as e:
-                            print(f"[compare_poses error] {e}")
-                            update_webrtc_state('action_page', {'pose_detected': True, })
-                    else:
-                        cv2.putText(img, 'Pose OK (no expert)', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-                        update_webrtc_state('action_page', {'pose_detected': True, })
-                else:
-                    cv2.putText(img, 'No pose detected', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 165, 0), 2)
-                    update_webrtc_state('action_page', {'pose_detected': False, 'feedback_score': 0, })
+                    # 매 프레임 자세 감지 상태 업데이트
+                    update_webrtc_state('action_page', {'pose_detected': True})
 
+                    # 자세 비교는 0.5초에 한 번 (더 부드러운 피드백)
+                    if current_time - _last_comparison_time['action_page'] >= 0.5:
+                        expert_lm = get_expert_landmarks('action_page')
+                        if expert_lm:
+                            try:
+                                comparison_result = compare_poses(user_result.pose_landmarks[0], expert_lm)
+                                raw_score = comparison_result['overall_score']
+                                raw_feedback = comparison_result['feedback']
+
+                                # 피드백 분석 업데이트 (평활화 + 안정화)
+                                update_feedback_analytics(
+                                    'action_page',
+                                    raw_score,
+                                    raw_feedback,
+                                    current_time
+                                )
+
+                                # 안정화된 결과 가져오기
+                                analytics = get_feedback_analytics('action_page')
+
+                                update_webrtc_state('action_page', {
+                                    'feedback_score': analytics['smoothed_score'],
+                                    'feedback_messages': analytics['stable_feedback'],
+                                    'joint_coverage': comparison_result.get('joint_coverage_percent', 100),
+                                    'pose_detected': True,
+                                    'score_trend': analytics['score_trend'],
+                                    'good_pose_time': analytics['good_pose_time'],
+                                })
+
+                                _last_comparison_time['action_page'] = current_time
+                            except Exception as e:
+                                print(f"[ACTION] 비교 오류: {e}")
+                else:
+                    update_webrtc_state('action_page', {'pose_detected': False})
+
+                # 손 감지
                 hand_result = user_hand_landmarker.detect_for_video(user_mp_image, timestamp_ms)
                 if hand_result.hand_landmarks:
                     img = draw_hands_on_image(img, hand_result)
 
             except Exception as e:
                 import traceback
+                print(f"[ACTION] 콜백 예외: {e}")
                 traceback.print_exc()
-                cv2.putText(img, f'Error: {str(e)[:40]}', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
             return av.VideoFrame.from_ndarray(img, format="rgb24")
 
+        # ---------------------------------------------------------------------
         # WebRTC 스트리머 설정
+        # ---------------------------------------------------------------------
+        # - SENDRECV: 양방향 통신 (카메라 입력 + 처리된 영상 출력)
+        # - STUN 서버: NAT 통과를 위한 Google STUN 서버 사용
+        # - async_processing: True로 설정하여 비동기 처리 활성화
         webrtc_ctx = webrtc_streamer(
             key="user_camera_action",
             mode=WebRtcMode.SENDRECV,
@@ -3743,38 +4058,103 @@ def show_action_page():
             async_processing=True,
         )
 
-    # 피드백 업데이트
-    if webrtc_ctx.state.playing:
-        st.session_state.action_webcam_running = True
-        st_autorefresh(interval=1000, key="feedback_refresh")
+    # ===========================================================================
+    # 8. 실시간 피드백 표시 (전문가 영상 아래 - feedback_placeholder 사용)
+    # ===========================================================================
+    # 깜박거림 방지를 위해 마지막 피드백 캐싱
+    if 'last_feedback_content' not in st.session_state:
+        st.session_state.last_feedback_content = ""
 
-        state = get_webrtc_state('action_page')
-        score = state.get('feedback_score', 0)
-        feedback_messages = state.get('feedback_messages', [])
-        coverage = state.get('joint_coverage', 0)
+    state = get_webrtc_state('action_page')
+    score = state.get('feedback_score', 0)
+    feedback_messages = state.get('feedback_messages', [])
+    coverage = state.get('joint_coverage', 0)
+    pose_detected = state.get('pose_detected', False)
+    score_trend = state.get('score_trend', 'stable')
+    good_pose_time = state.get('good_pose_time', 0)
+    expert_lm = get_expert_landmarks('action_page')
+    is_playing = webrtc_ctx.state.playing if webrtc_ctx else False
 
-        if expert_reference_landmarks and score > 0:
-            score_color = "🟢" if score >= 80 else "🟡" if score >= 60 else "🔴"
-            feedback_text = f"**{score_color} {score:.0f}점, 관절 감지: {coverage}%**\n\n"
+    if is_playing:
+        st_autorefresh(interval=500, key="feedback_refresh")
+
+        # 피드백 콘텐츠 구성
+        if score > 0:
+            # 점수 색상 및 아이콘
+            if score >= 80:
+                score_color, score_icon = "🟢", "🎯"
+            elif score >= 60:
+                score_color, score_icon = "🟡", "📈"
+            else:
+                score_color, score_icon = "🔴", "💪"
+
+            # 추세 아이콘
+            trend_icon = {"up": "↗️", "down": "↘️", "stable": "➡️"}.get(score_trend, "")
+
+            # 자세 유지 시간 표시
+            if good_pose_time >= 1.0:
+                hold_text = f" | 유지: {good_pose_time:.0f}초"
+            else:
+                hold_text = ""
+
+            # 메인 점수 라인
+            feedback_text = f"**{score_icon} {score:.0f}점 {trend_icon}**{hold_text}\n\n"
+
+            # 감지율이 낮으면 표시
+            if coverage < 80:
+                feedback_text += f"📷 감지율: {coverage}%\n\n"
+
+            # 피드백 메시지 (안정화된 것만 표시)
             if feedback_messages:
                 for fb in feedback_messages[:3]:
                     feedback_text += f"{fb}\n\n"
-            feedback_placeholder.markdown(feedback_text)
-            st.session_state.comparison_score = score
-        elif state.get('pose_detected', False):
-            feedback_placeholder.success("✅ 자세 감지 중...")
-        else:
-            feedback_placeholder.warning("⏳ 카메라 앞에 서주세요")
-    else:
-        st.session_state.action_webcam_running = False
-        reset_webrtc_state('action_page')
+            elif score >= 80:
+                feedback_text += "완벽합니다!"
 
-    # 전문가 영상 처리 버튼 (JSON이 없는 경우만 표시)
+            # 깜박거림 방지: 내용이 변경된 경우에만 업데이트
+            if feedback_text != st.session_state.last_feedback_content:
+                st.session_state.last_feedback_content = feedback_text
+                feedback_placeholder.markdown(feedback_text)
+            else:
+                feedback_placeholder.markdown(feedback_text)
+
+            st.session_state.comparison_score = score
+        elif pose_detected and expert_lm:
+            msg = "분석 중..."
+            if msg != st.session_state.last_feedback_content:
+                st.session_state.last_feedback_content = msg
+                feedback_placeholder.info(msg)
+            else:
+                feedback_placeholder.info(msg)
+        else:
+            msg = "전신이 보이도록 자세를 취해주세요"
+            if msg != st.session_state.last_feedback_content:
+                st.session_state.last_feedback_content = msg
+                feedback_placeholder.info(msg)
+            else:
+                feedback_placeholder.info(msg)
+    else:
+        msg = "START 버튼을 눌러 카메라를 시작하세요"
+        if msg != st.session_state.last_feedback_content:
+            st.session_state.last_feedback_content = msg
+            feedback_placeholder.info(msg)
+        else:
+            feedback_placeholder.info(msg)
+
+    # ===========================================================================
+    # 9. 전문가 영상 처리 버튼 (랜드마크 JSON이 없는 경우)
+    # ===========================================================================
+    # 전문가 랜드마크가 없으면 자세 비교 기능 사용 불가
+    # 버튼을 클릭하면 process_expert_video_with_skeleton()으로 영상 처리
     if not os.path.exists(landmarks_json_path) and os.path.exists(video_path):
         st.markdown("---")
         st.warning("⚠️ 전문가 자세 데이터가 없습니다. 자세 비교 기능을 사용하려면 영상을 처리해주세요.")
         if st.button("🔄 전문가 영상 처리 (스켈레톤 + 랜드마크 추출)", key="process_expert"):
             with st.spinner("전문가 영상 처리 중... (1-2분 소요)"):
+                # process_expert_video_with_skeleton():
+                # 1. 영상의 각 프레임에서 MediaPipe Pose로 스켈레톤 추출
+                # 2. 스켈레톤 오버레이된 영상 생성 (videos/processed/)
+                # 3. 대표 프레임의 랜드마크를 JSON으로 저장 (data/expert_landmarks/)
                 processed_path, landmarks_path = process_expert_video_with_skeleton(video_path)
                 if processed_path and landmarks_path:
                     st.success("✅ 처리 완료! 페이지를 새로고침하세요.")
@@ -3782,30 +4162,45 @@ def show_action_page():
                 else:
                     st.error("❌ 처리 실패. 콘솔 로그를 확인하세요.")
 
-    # 완료 조건 체크 (점수 80점 이상)
+    # ===========================================================================
+    # 10. 동작 완료 조건 체크 (자동 완료)
+    # ===========================================================================
+    # 점수가 80점 이상이면 해당 동작을 자동으로 완료 처리
     if st.session_state.comparison_score >= 80:
         if st.session_state.current_action not in st.session_state.completed_actions:
             st.session_state.completed_actions.append(st.session_state.current_action)
             st.success(f"✅ {action['name']} 동작을 완료했습니다!")
-            st.balloons()
+            st.balloons()  # 축하 효과
 
-    # 세부 영상 표시
+    # ===========================================================================
+    # 11. 세부 영상 표시 (선택적)
+    # ===========================================================================
+    # 일부 동작은 세부 각도별 영상이 있음
     if 'detail_videos' in action:
         render_detail_videos(action['detail_videos'], video_path)
 
-    # 다음 동작으로 이동 버튼
+    # ===========================================================================
+    # 12. 다음 동작 이동 버튼 (수동 완료)
+    # ===========================================================================
     st.markdown("---")
+    # 사용자가 수동으로 다음 동작으로 이동할 수 있는 버튼
     if st.button(t('action_complete_manual'), help=t('ai_judgement')):
+        # 완료되지 않은 동작도 완료 목록에 추가 (수동 완료)
         if st.session_state.current_action not in st.session_state.completed_actions:
             st.session_state.completed_actions.append(st.session_state.current_action)
 
+        # 다음 동작 인덱스로 이동
         st.session_state.current_action += 1
         st.session_state.action_webcam_running = False
+        # 모든 동작 완료 시 밈 카드 생성 페이지로 이동
         if st.session_state.current_action >= len(basic_actions):
             st.session_state.current_step = 'meme'
         st.rerun()
 
-    # 배지 체크
+    # ===========================================================================
+    # 13. 배지 획득 체크
+    # ===========================================================================
+    # 완료한 동작 수에 따라 배지 부여 (3개, 6개, 9개, 12개 완료 시)
     completed_count = len(st.session_state.completed_actions)
     badge_system = get_badge_system(st.session_state.language)
     if completed_count in badge_system and completed_count not in st.session_state.badges:
@@ -5771,10 +6166,38 @@ def load_expert_landmarks(landmarks_json_path):
 
 def show_pose_test_page():
     """
-    MediaPipe를 활용한 실시간 자세 감지 페이지 (WebRTC 기반)
-    - Streamlit Cloud 배포 호환
-    - 전문가 자세와 비교 기능 추가
+    ================================================================================
+    카메라 테스트 페이지 (WebRTC 기반 실시간 자세 감지)
+    ================================================================================
+
+    [아키텍처 개요]
+    이 페이지는 MediaPipe를 활용하여 웹캠에서 실시간으로 자세를 감지하고,
+    선택적으로 전문가 자세와 비교하는 테스트 기능을 제공합니다.
+
+    [레이아웃 구조]
+    - col1 (2/3 너비): 웹캠 영상 + 스켈레톤 오버레이
+    - col2 (1/3 너비): 설정 패널 + 피드백 표시
+
+    [주요 기능]
+    1. 실시간 자세 감지 (MediaPipe Pose - 33개 랜드마크)
+    2. 선택적 손 감지 (MediaPipe Hands - 21개 랜드마크/손)
+    3. 전문가 자세와 비교 (활성화 시)
+    4. 감지 신뢰도/추적 신뢰도 조절
+
+    [데이터 흐름]
+    - WebRTC 콜백(video_frame_callback)에서 각 프레임 처리
+    - 공유 상태(_webrtc_shared_state['pose_test_page'])에 결과 저장
+    - st_autorefresh(1초)로 UI 업데이트
+
+    [기본동작배우기와의 차이점]
+    - 기본동작배우기: 특정 동작 학습에 초점, 점수 기반 완료 체크
+    - 카메라테스트: 자유로운 테스트 환경, 설정 조절 가능
+    ================================================================================
     """
+
+    # ===========================================================================
+    # 1. 페이지 헤더
+    # ===========================================================================
     st.markdown("""
     <div style='text-align: center; padding: 1rem 0;'>
         <h2>🎯 실시간 자세 감지 테스트</h2>
@@ -5782,23 +6205,35 @@ def show_pose_test_page():
     </div>
     """, unsafe_allow_html=True)
 
-    # 세션 상태 초기화
+    # ===========================================================================
+    # 2. 세션 상태 초기화
+    # ===========================================================================
+    # 랜드마크 데이터 저장용 (CSV 내보내기 등에 활용 가능)
     if 'pose_landmarks_data' not in st.session_state:
-        st.session_state.pose_landmarks_data = []
+        st.session_state.pose_landmarks_data = []  # Pose 랜드마크 히스토리
     if 'hand_landmarks_data' not in st.session_state:
-        st.session_state.hand_landmarks_data = []
+        st.session_state.hand_landmarks_data = []  # Hand 랜드마크 히스토리
     if 'frame_count' not in st.session_state:
-        st.session_state.frame_count = 0
+        st.session_state.frame_count = 0  # 처리된 프레임 수
 
-    # 메인 컨텐츠
+    # ===========================================================================
+    # 3. 2열 레이아웃 (웹캠 | 설정)
+    # ===========================================================================
+    # col2(설정)를 먼저 렌더링하여 설정 변수들을 정의한 후 col1에서 사용
     col1, col2 = st.columns([2, 1])
 
-    # col2(설정)를 먼저 렌더링하여 변수들을 정의
+    # -------------------------------------------------------------------------
+    # 3-1. 오른쪽 컬럼: 설정 패널 (col2를 먼저 렌더링하여 변수 정의)
+    # -------------------------------------------------------------------------
     with col2:
         st.markdown("### ⚙️ 설정")
 
-        # 감지 설정
+        # ---------------------------------------------------------------------
+        # 3-1-1. MediaPipe 감지 설정
+        # ---------------------------------------------------------------------
         st.markdown("#### 감지 설정")
+        # 감지 신뢰도: 새로운 자세를 처음 감지할 때의 임계값
+        # 낮으면 감지가 쉬워지지만 오탐(false positive) 증가
         min_detection_confidence = st.slider(
             "감지 신뢰도",
             min_value=0.0,
@@ -5808,6 +6243,8 @@ def show_pose_test_page():
             help="자세를 처음 감지할 때의 최소 신뢰도"
         )
 
+        # 추적 신뢰도: 이미 감지된 자세를 프레임 간 추적할 때의 임계값
+        # 낮으면 추적이 지속되지만 부정확할 수 있음
         min_tracking_confidence = st.slider(
             "추적 신뢰도",
             min_value=0.0,
@@ -5817,13 +6254,14 @@ def show_pose_test_page():
             help="이미 감지된 자세를 추적할 때의 최소 신뢰도"
         )
 
+        # 스켈레톤 오버레이 표시 여부
         show_landmarks = st.checkbox(
             "랜드마크 표시",
             value=True,
             help="웹캠 화면에 자세 랜드마크를 표시"
         )
 
-        # MediaPipe Hands 활성화
+        # MediaPipe Hands 활성화 (추가 리소스 사용)
         enable_hands = st.checkbox(
             "✋ MediaPipe Hands 활성화",
             value=False,
@@ -5832,16 +6270,20 @@ def show_pose_test_page():
 
         st.markdown("---")
 
-        # 전문가 자세 비교 설정
+        # ---------------------------------------------------------------------
+        # 3-1-2. 전문가 자세 비교 설정
+        # ---------------------------------------------------------------------
         st.markdown("#### 🎯 전문가 자세 비교")
 
-        # 사용 가능한 전문가 랜드마크 파일 목록
+        # data/expert_landmarks/ 디렉토리에서 사용 가능한 전문가 랜드마크 파일 검색
         expert_landmarks_dir = "data/expert_landmarks"
         expert_files = []
         if os.path.exists(expert_landmarks_dir):
+            # "_landmarks.json" 접미사를 제거하여 동작 이름만 추출
             expert_files = [f.replace("_landmarks.json", "") for f in os.listdir(expert_landmarks_dir) if f.endswith("_landmarks.json")]
 
         if expert_files:
+            # 전문가 자세 비교 활성화 체크박스
             enable_comparison = st.checkbox(
                 "전문가 자세 비교 활성화",
                 value=False,
@@ -5849,22 +6291,29 @@ def show_pose_test_page():
             )
 
             if enable_comparison:
+                # 비교할 전문가 동작 선택
                 selected_expert = st.selectbox(
                     "비교할 동작 선택",
                     options=expert_files,
-                    format_func=lambda x: x.replace("-", " ").title()
+                    format_func=lambda x: x.replace("-", " ").title()  # 파일명을 보기 좋게 변환
                 )
             else:
                 selected_expert = None
         else:
+            # 전문가 데이터가 없으면 비교 기능 비활성화
             enable_comparison = False
             selected_expert = None
             st.info("📂 전문가 자세 데이터가 없습니다")
 
         st.markdown("---")
+
+        # ---------------------------------------------------------------------
+        # 3-1-3. 감지 정보 및 피드백 표시 영역
+        # ---------------------------------------------------------------------
         st.markdown("### 📊 감지 정보")
 
-        # 피드백 표시 영역
+        # 피드백 컨테이너: WebRTC 콜백 결과를 표시할 영역
+        # st_autorefresh로 주기적으로 업데이트됨
         feedback_container = st.container()
 
         # MediaPipe Pose 랜드마크 정보
@@ -5906,59 +6355,105 @@ def show_pose_test_page():
             - 카메라와 2-3m 거리를 유지하세요
             """)
 
-    # col1(웹캠)
+    # -------------------------------------------------------------------------
+    # 3-2. 왼쪽 컬럼: 웹캠 영상 (col1)
+    # -------------------------------------------------------------------------
     with col1:
         st.markdown("### 📹 웹캠 영상")
 
-        # 캐시된 MediaPipe 사용
+        # ---------------------------------------------------------------------
+        # 3-2-1. MediaPipe 모델 로드
+        # ---------------------------------------------------------------------
+        # @st.cache_resource로 캐시됨 - 설정 변경 시에만 재생성
+        # 신뢰도 값이 변경되면 새 모델이 생성됨 (캐시 키가 달라짐)
         pose_landmarker = get_pose_landmarker(min_detection_confidence, min_tracking_confidence)
         hand_landmarker = get_hand_landmarker(min_detection_confidence, min_tracking_confidence) if enable_hands else None
 
-        # 전문가 랜드마크 로드
+        # ---------------------------------------------------------------------
+        # 3-2-2. 전문가 랜드마크 로드 (비교 기능 활성화 시)
+        # ---------------------------------------------------------------------
         expert_reference_landmarks = None
         if enable_comparison and selected_expert:
             expert_json_path = f"{expert_landmarks_dir}/{selected_expert}_landmarks.json"
             if os.path.exists(expert_json_path):
                 expert_reference_landmarks = load_expert_landmarks(expert_json_path)
+                if expert_reference_landmarks:
+                    # 공유 저장소에 설정 (WebRTC 콜백에서 접근용)
+                    set_expert_landmarks('pose_test_page', expert_reference_landmarks)
 
-        # WebRTC 비디오 프레임 콜백
+        # ---------------------------------------------------------------------
+        # 3-2-3. WebRTC 비디오 프레임 콜백 함수
+        # ---------------------------------------------------------------------
+        # 주의: 이 함수는 별도의 스레드에서 실행됨!
+        # Streamlit의 st.session_state에 직접 접근 불가
+        # 대신 모듈 레벨 전역 변수를 통해 데이터 공유
         def video_frame_callback(frame: av.VideoFrame) -> av.VideoFrame:
+            """
+            WebRTC 스트림의 각 프레임을 처리하는 콜백
+
+            [처리 흐름]
+            1. 프레임 → numpy 배열 변환
+            2. 좌우 반전 (거울 모드)
+            3. MediaPipe Pose 감지
+            4. (선택) 스켈레톤 오버레이
+            5. (선택) 전문가 자세와 비교
+            6. (선택) MediaPipe Hands 감지
+            7. 공유 상태 업데이트
+            """
+            global _last_comparison_time
+            # av.VideoFrame → numpy 배열
             img = frame.to_ndarray(format="rgb24")
+            # 좌우 반전 (거울 효과)
             img = cv2.flip(img, 1)
 
             try:
                 import time
-                timestamp_ms = int(time.time() * 1000)
+                current_time = time.time()
+                # MediaPipe VIDEO 모드는 단조 증가하는 타임스탬프 필요
+                timestamp_ms = int(current_time * 1000)
 
+                # MediaPipe Image 생성 및 Pose 감지
                 mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img)
                 pose_result = pose_landmarker.detect_for_video(mp_image, timestamp_ms)
 
+                # 랜드마크 표시가 활성화되고 자세가 감지된 경우
                 if show_landmarks and pose_result.pose_landmarks:
+                    # 스켈레톤 오버레이 그리기
                     img = draw_landmarks_on_image(img, pose_result)
 
-                    if expert_reference_landmarks:
-                        try:
-                            comparison_result = compare_poses(pose_result.pose_landmarks[0], expert_reference_landmarks)
-                            score = comparison_result['overall_score']
-                            color = (0, 255, 0) if score >= 80 else (255, 165, 0) if score >= 60 else (255, 0, 0)
-                            cv2.putText(img, f'Score: {score}%', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
-                            update_webrtc_state('pose_test_page', {
-                                'feedback_score': score,
-                                'feedback_messages': comparison_result['feedback'],
-                                'joint_coverage': comparison_result.get('joint_coverage_percent', 100),
-                                'pose_detected': True,
-                                                            })
-                        except Exception as e:
-                            update_webrtc_state('pose_test_page', {'pose_detected': True, })
+                    # 전문가 자세 비교 (1초 간격으로 - CPU 부하 감소)
+                    if current_time - _last_comparison_time['pose_test_page'] >= 1.0:
+                        expert_lm = get_expert_landmarks('pose_test_page')
+                        if expert_lm:
+                            try:
+                                # compare_poses(): 관절 각도 비교 → 점수/피드백 계산
+                                comparison_result = compare_poses(pose_result.pose_landmarks[0], expert_lm)
+                                score = comparison_result['overall_score']
+                                # 공유 상태 업데이트 (UI에서 읽어감)
+                                update_webrtc_state('pose_test_page', {
+                                    'feedback_score': score,
+                                    'feedback_messages': comparison_result['feedback'],
+                                    'joint_coverage': comparison_result.get('joint_coverage_percent', 100),
+                                    'pose_detected': True,
+                                })
+                                _last_comparison_time['pose_test_page'] = current_time
+                            except Exception as e:
+                                update_webrtc_state('pose_test_page', {'pose_detected': True})
+                        else:
+                            # 전문가 랜드마크 없음 - 단순 감지만
+                            update_webrtc_state('pose_test_page', {'pose_detected': True})
                     else:
-                        cv2.putText(img, 'Pose: OK', (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-                        update_webrtc_state('pose_test_page', {'pose_detected': True, })
+                        # 비교 대기 중 (1초 미경과)
+                        update_webrtc_state('pose_test_page', {'pose_detected': True})
                 else:
-                    update_webrtc_state('pose_test_page', {'pose_detected': False, 'feedback_score': 0, })
+                    # 자세 감지 안 됨
+                    update_webrtc_state('pose_test_page', {'pose_detected': False, 'feedback_score': 0})
 
+                # 손 감지 (활성화된 경우)
                 if enable_hands and hand_landmarker:
                     hand_result = hand_landmarker.detect_for_video(mp_image, timestamp_ms)
                     if hand_result.hand_landmarks:
+                        # 손 스켈레톤 오버레이
                         img = draw_hands_on_image(img, hand_result)
                         update_webrtc_state('pose_test_page', {'hands_detected': len(hand_result.hand_landmarks)})
                     else:
@@ -5968,9 +6463,14 @@ def show_pose_test_page():
                 import traceback
                 traceback.print_exc()
 
+            # 처리된 프레임 반환
             return av.VideoFrame.from_ndarray(img, format="rgb24")
 
-        # WebRTC 스트리머
+        # ---------------------------------------------------------------------
+        # 3-2-4. WebRTC 스트리머 설정
+        # ---------------------------------------------------------------------
+        # - SENDRECV: 카메라 입력 + 처리된 영상 출력
+        # - STUN 서버: NAT 통과용 (Google 공개 STUN 서버)
         webrtc_ctx = webrtc_streamer(
             key="pose_test_camera",
             mode=WebRtcMode.SENDRECV,
@@ -5980,47 +6480,63 @@ def show_pose_test_page():
             async_processing=True,
         )
 
-        # 피드백 업데이트
+        # ---------------------------------------------------------------------
+        # 3-2-5. 피드백 UI 업데이트
+        # ---------------------------------------------------------------------
+        # WebRTC가 재생 중일 때만 피드백 표시
         if webrtc_ctx.state.playing:
+            # st_autorefresh: 1초마다 페이지 새로고침 → 공유 상태를 UI에 반영
             st_autorefresh(interval=1000, key="pose_test_feedback_refresh")
 
+            # 공유 상태에서 최신 데이터 가져오기
             state = get_webrtc_state('pose_test_page')
 
+            # 피드백 컨테이너에 결과 표시
             with feedback_container:
                 if enable_comparison and expert_reference_landmarks:
+                    # 전문가 비교 모드 - 점수와 피드백 표시
                     score = state.get('feedback_score', 0)
                     messages = state.get('feedback_messages', [])
                     joint_coverage = state.get('joint_coverage', 0)
 
+                    # 점수에 따른 색상 구분
                     if score >= 80:
-                        st.success(f"🎯 유사도: {score}%")
+                        st.success(f"🎯 유사도: {score:.0f}%")
                     elif score >= 60:
-                        st.warning(f"🎯 유사도: {score}%")
+                        st.warning(f"🎯 유사도: {score:.0f}%")
                     elif score > 0:
-                        st.error(f"🎯 유사도: {score}%")
+                        st.error(f"🎯 유사도: {score:.0f}%")
                     else:
                         st.info("📊 자세 분석 중...")
 
+                    # 관절 감지율 프로그레스 바
                     if joint_coverage > 0:
                         st.progress(joint_coverage / 100, text=f"관절 감지율: {joint_coverage}%")
 
+                    # 교정 피드백 메시지 (상위 3개)
                     if messages:
                         for msg in messages[:3]:
                             st.caption(msg)
                 else:
+                    # 단순 감지 모드 (비교 비활성화)
                     if state.get('pose_detected', False):
                         st.success("✅ 자세 감지 중")
                     else:
                         st.info("📊 자세 분석 중...")
 
+                    # 손 감지 정보 표시
                     if enable_hands and state.get('hands_detected', 0) > 0:
                         st.info(f"✋ 손 감지: {state['hands_detected']}개")
         else:
+            # WebRTC 중지 시 공유 상태 리셋
             reset_webrtc_state('pose_test_page')
 
-    # 뒤로가기 버튼
+    # ===========================================================================
+    # 4. 홈으로 돌아가기 버튼
+    # ===========================================================================
     st.markdown("---")
     if st.button("🏠 홈으로 돌아가기", use_container_width=True):
+        # 페이지 이동 전 공유 상태 정리
         reset_webrtc_state('pose_test_page')
         st.session_state.current_step = 'landing'
         st.rerun()
