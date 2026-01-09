@@ -178,14 +178,24 @@ def pose_comparison_component(
 
             /* ================================================================
                비디오 컨테이너 - 4:3 비율 유지, 둥근 모서리
+               모바일 세로모드에서도 비율 유지
                ================================================================ */
             .video-container {{
                 position: relative;
                 width: 100%;
-                aspect-ratio: 4 / 3;  /* 비율 왜곡 방지 */
+                padding-bottom: 75%;  /* 4:3 비율 = 3/4 = 75% (aspect-ratio 폴백) */
+                height: 0;
                 background: #1a1a2e;
                 border-radius: 12px;
                 overflow: hidden;
+            }}
+
+            @supports (aspect-ratio: 4 / 3) {{
+                .video-container {{
+                    padding-bottom: 0;
+                    height: auto;
+                    aspect-ratio: 4 / 3;
+                }}
             }}
 
             /* 실제 비디오 요소는 숨김 (캔버스에 그림) */
@@ -325,6 +335,21 @@ def pose_comparison_component(
             .success-overlay.show {{ display: flex; }}
             .success-icon {{ font-size: 40px; margin-bottom: 8px; }}
             .success-text {{ font-size: 20px; font-weight: bold; color: white; }}
+
+            /* 컨페티 효과 */
+            .confetti {{
+                position: fixed;
+                width: 10px;
+                height: 10px;
+                top: -10px;
+                z-index: 1000;
+                pointer-events: none;
+            }}
+
+            @keyframes confetti-fall {{
+                0% {{ transform: translateY(0) rotate(0deg); opacity: 1; }}
+                100% {{ transform: translateY(100vh) rotate(720deg); opacity: 0; }}
+            }}
 
             /* ================================================================
                피드백 영역 - 비디오 아래에 점수와 피드백 표시
@@ -717,6 +742,7 @@ def pose_comparison_component(
                     if (avgScore >= TARGET_SCORE && !successShown) {{
                         successShown = true;
                         successOverlay.classList.add('show');
+                        createConfetti();  // 컨페티 효과
                         setTimeout(() => successOverlay.classList.remove('show'), 2500);
                     }}
 
@@ -736,6 +762,30 @@ def pose_comparison_component(
                     return true;
                 }}
                 return false;
+            }}
+
+            // ================================================================
+            // 컨페티 효과 생성 (성공 시 호출)
+            // ================================================================
+            function createConfetti() {{
+                const colors = ['#ff6b6b', '#ffd93d', '#6bcb77', '#4dabf7', '#da77f2', '#ffa94d'];
+                const confettiCount = 50;
+
+                for (let i = 0; i < confettiCount; i++) {{
+                    const confetti = document.createElement('div');
+                    confetti.className = 'confetti';
+                    confetti.style.left = Math.random() * 100 + 'vw';
+                    confetti.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+                    confetti.style.borderRadius = Math.random() > 0.5 ? '50%' : '0';
+                    confetti.style.width = (Math.random() * 10 + 5) + 'px';
+                    confetti.style.height = (Math.random() * 10 + 5) + 'px';
+                    confetti.style.animation = `confetti-fall ${{Math.random() * 2 + 2}}s linear forwards`;
+                    confetti.style.animationDelay = Math.random() * 0.5 + 's';
+                    document.body.appendChild(confetti);
+
+                    // 애니메이션 후 제거
+                    setTimeout(() => confetti.remove(), 4500);
+                }}
             }}
 
             // ================================================================
@@ -765,7 +815,7 @@ def pose_comparison_component(
             // - 비디오 렌더링, 스켈레톤 그리기, 점수 계산
             // ================================================================
             function onResults(results) {{
-                // 캔버스 크기 조정
+                // 캔버스 크기 조정 (컨테이너 실제 크기에 맞춤)
                 canvas.width = canvas.offsetWidth;
                 canvas.height = canvas.offsetHeight;
 
