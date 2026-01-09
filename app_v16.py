@@ -4264,28 +4264,6 @@ def show_action_page():
                 lang=lang,
             )
 
-            # 클라이언트 모드: 다음 동작 버튼 (항상 표시)
-            # JavaScript 컴포넌트에서 성공 시 "다음 동작" 버튼이 나타나지만,
-            # Streamlit과 통신이 어려우므로 별도의 Streamlit 버튼도 제공
-            st.markdown("---")
-            next_col1, next_col2, next_col3 = st.columns([1, 2, 1])
-            with next_col2:
-                if st.button(
-                    "➡️ 다음 동작으로" if lang == 'ko' else "➡️ Next Action",
-                    key="client_next_action_btn",
-                    type="primary",
-                    use_container_width=True
-                ):
-                    current_idx = st.session_state.get('current_action_idx', 0)
-                    total_actions = len(st.session_state.get('selected_actions', []))
-                    if current_idx < total_actions - 1:
-                        st.session_state.current_action_idx = current_idx + 1
-                        st.rerun()
-                    else:
-                        # 마지막 동작 완료
-                        st.session_state.page = 'complete'
-                        st.rerun()
-
             # 클라이언트 모드에서는 webrtc_ctx가 없음
             webrtc_ctx = None
 

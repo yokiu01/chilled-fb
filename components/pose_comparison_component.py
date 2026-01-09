@@ -145,8 +145,8 @@ def pose_comparison_component(
     t = texts.get(lang, texts["ko"])
     texts_json = json.dumps(t, ensure_ascii=False)
 
-    # 전체 높이 = 비디오 + 피드백 영역 + 정지 버튼
-    total_height = height + 150
+    # 전체 높이 = 비디오 + 피드백 영역 + 정지 버튼 (최소화)
+    total_height = height + 120
 
     # =========================================================================
     # HTML/CSS/JavaScript 코드
