@@ -4188,6 +4188,10 @@ def show_action_page():
     if 'last_feedback_text' not in st.session_state:
         st.session_state.last_feedback_text = ""
 
+    # 축하 효과 중복 방지를 위한 세션 상태
+    if 'celebrated_actions' not in st.session_state:
+        st.session_state.celebrated_actions = set()
+
     @st.fragment(run_every=2)  # 2초마다 이 영역만 새로고침
     def render_feedback():
         """피드백 영역만 부분 새로고침 (전체 페이지 깜박임 방지)"""
@@ -4204,20 +4208,54 @@ def show_action_page():
             return
 
         if score > 0:
-            # 참조 파일 디자인: 점수 + 감지율 + 피드백 메시지
-            score_color = "🟢" if score >= 80 else "🟡" if score >= 60 else "🔴"
-            feedback_text = f"**{score_color} {score:.0f}점, 카메라에 감지된 관절: {coverage}%**\n\n"
+            # 80점 이상: 축하 효과 + 다음 동작 버튼
+            if score >= 80:
+                # 축하 효과 (해당 동작에서 처음 80점 달성 시에만)
+                current_action_key = f"action_{st.session_state.current_action}"
+                if current_action_key not in st.session_state.celebrated_actions:
+                    st.session_state.celebrated_actions.add(current_action_key)
+                    st.balloons()
 
-            if messages:
-                for fb in messages:
-                    feedback_text += f"{fb}\n\n"
+                # 축하 메시지 박스
+                st.success(f"""
+                🎉 **훌륭합니다! {score:.0f}점 달성!**
+
+                이 동작을 완벽하게 수행했습니다!
+                """)
+
+                # 다음 동작 버튼
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("🚀 다음 동작으로", key="next_action_btn", type="primary", use_container_width=True):
+                        # 완료 목록에 추가
+                        if st.session_state.current_action not in st.session_state.completed_actions:
+                            st.session_state.completed_actions.append(st.session_state.current_action)
+                        # 다음 동작으로 이동
+                        st.session_state.current_action += 1
+                        st.session_state.action_webcam_running = False
+                        # 모든 동작 완료 시 밈 카드 페이지로
+                        if st.session_state.current_action >= len(basic_actions):
+                            st.session_state.current_step = 'meme'
+                        st.rerun()
+                with col2:
+                    if st.button("🔄 더 연습하기", key="keep_practice_btn", use_container_width=True):
+                        pass  # 현재 페이지 유지
+
+                # 현재 점수도 표시
+                st.markdown(f"**현재 점수: {score:.0f}점** | 감지된 관절: {coverage}%")
             else:
-                feedback_text += "🟢 완벽합니다!"
+                # 80점 미만: 기존 피드백 표시
+                score_color = "🟡" if score >= 60 else "🔴"
+                feedback_text = f"**{score_color} {score:.0f}점, 카메라에 감지된 관절: {coverage}%**\n\n"
 
-            # 변경시에만 업데이트 (깜박임 최소화)
-            if st.session_state.last_feedback_text != feedback_text:
-                st.session_state.last_feedback_text = feedback_text
-            st.markdown(feedback_text)
+                if messages:
+                    for fb in messages:
+                        feedback_text += f"{fb}\n\n"
+
+                # 변경시에만 업데이트 (깜박임 최소화)
+                if st.session_state.last_feedback_text != feedback_text:
+                    st.session_state.last_feedback_text = feedback_text
+                st.markdown(feedback_text)
         elif pose_detected and expert_lm:
             st.info("분석 중...")
         else:
@@ -4249,24 +4287,14 @@ def show_action_page():
                     st.error("❌ 처리 실패. 콘솔 로그를 확인하세요.")
 
     # ===========================================================================
-    # 10. 동작 완료 조건 체크 (자동 완료)
-    # ===========================================================================
-    # 점수가 80점 이상이면 해당 동작을 자동으로 완료 처리
-    if st.session_state.comparison_score >= 80:
-        if st.session_state.current_action not in st.session_state.completed_actions:
-            st.session_state.completed_actions.append(st.session_state.current_action)
-            st.success(f"✅ {action['name']} 동작을 완료했습니다!")
-            st.balloons()  # 축하 효과
-
-    # ===========================================================================
-    # 11. 세부 영상 표시 (선택적)
+    # 10. 세부 영상 표시 (선택적)
     # ===========================================================================
     # 일부 동작은 세부 각도별 영상이 있음
     if 'detail_videos' in action:
         render_detail_videos(action['detail_videos'], video_path)
 
     # ===========================================================================
-    # 12. 다음 동작 이동 버튼 (수동 완료)
+    # 11. 다음 동작 이동 버튼 (수동 완료)
     # ===========================================================================
     st.markdown("---")
     # 사용자가 수동으로 다음 동작으로 이동할 수 있는 버튼
