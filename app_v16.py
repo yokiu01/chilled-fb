@@ -101,10 +101,24 @@ def _get_webrtc_shared_state():
 
 @st.cache_resource
 def _get_expert_landmarks_store():
-    """전문가 랜드마크 저장소를 캐시"""
+    """전문가 랜드마크 저장소를 캐시 (프레임별 랜드마크 지원)"""
     return {
-        'action_page': None,
-        'pose_test_page': None
+        'action_page': {
+            'frames': [],           # 모든 프레임의 랜드마크 리스트
+            'fps': 30,              # 영상 FPS
+            'total_frames': 0,      # 총 프레임 수
+            'duration_ms': 0,       # 영상 길이 (ms)
+            'video_start_time': 0,  # 영상 재생 시작 시간 (time.time())
+            'single_landmark': None # 기존 호환용 단일 랜드마크
+        },
+        'pose_test_page': {
+            'frames': [],
+            'fps': 30,
+            'total_frames': 0,
+            'duration_ms': 0,
+            'video_start_time': 0,
+            'single_landmark': None
+        }
     }
 
 @st.cache_resource
@@ -177,14 +191,84 @@ _feedback_analytics = _get_feedback_analytics()
 _landmark_smoother = _get_landmark_smoother()
 
 def set_expert_landmarks(page_key, landmarks):
-    """전문가 랜드마크를 공유 저장소에 설정"""
+    """전문가 랜드마크를 공유 저장소에 설정 (기존 호환용 - 단일 랜드마크)"""
     with _webrtc_state_lock:
-        _expert_landmarks_store[page_key] = landmarks
+        if page_key in _expert_landmarks_store:
+            _expert_landmarks_store[page_key]['single_landmark'] = landmarks
+
+def set_expert_landmarks_data(page_key, frames, fps, total_frames):
+    """전문가 랜드마크 전체 데이터 설정 (프레임별 랜드마크)"""
+    with _webrtc_state_lock:
+        if page_key in _expert_landmarks_store:
+            _expert_landmarks_store[page_key]['frames'] = frames
+            _expert_landmarks_store[page_key]['fps'] = fps
+            _expert_landmarks_store[page_key]['total_frames'] = total_frames
+            _expert_landmarks_store[page_key]['duration_ms'] = int((total_frames / fps) * 1000) if fps > 0 else 0
+            # 단일 랜드마크도 설정 (중간 프레임)
+            if frames:
+                mid_idx = len(frames) // 2
+                for frame in frames[mid_idx:] + frames[:mid_idx]:
+                    if frame.get('pose_landmarks'):
+                        _expert_landmarks_store[page_key]['single_landmark'] = frame['pose_landmarks']
+                        break
+
+def set_expert_video_start_time(page_key):
+    """전문가 영상 재생 시작 시간 기록"""
+    with _webrtc_state_lock:
+        if page_key in _expert_landmarks_store:
+            _expert_landmarks_store[page_key]['video_start_time'] = time.time()
 
 def get_expert_landmarks(page_key):
-    """공유 저장소에서 전문가 랜드마크 가져오기"""
+    """공유 저장소에서 전문가 랜드마크 가져오기 (기존 호환용 - 단일 랜드마크)"""
     with _webrtc_state_lock:
-        return _expert_landmarks_store.get(page_key)
+        store = _expert_landmarks_store.get(page_key)
+        if store:
+            return store.get('single_landmark')
+        return None
+
+def get_expert_landmark_at_time(page_key, current_time=None):
+    """
+    현재 시간에 해당하는 전문가 랜드마크 가져오기
+    영상 재생 위치에 맞는 프레임의 랜드마크를 반환
+
+    Args:
+        page_key: 페이지 키
+        current_time: 현재 시간 (None이면 time.time() 사용)
+
+    Returns:
+        해당 프레임의 pose_landmarks 또는 None
+    """
+    with _webrtc_state_lock:
+        store = _expert_landmarks_store.get(page_key)
+        if not store or not store['frames']:
+            return store.get('single_landmark') if store else None
+
+        if current_time is None:
+            current_time = time.time()
+
+        video_start = store['video_start_time']
+        if video_start == 0:
+            # 영상 시작 시간이 설정되지 않았으면 단일 랜드마크 반환
+            return store.get('single_landmark')
+
+        # 영상 재생 경과 시간 (ms)
+        elapsed_ms = (current_time - video_start) * 1000
+        duration_ms = store['duration_ms']
+
+        if duration_ms <= 0:
+            return store.get('single_landmark')
+
+        # 루프 재생 고려: elapsed_ms % duration_ms
+        current_pos_ms = elapsed_ms % duration_ms
+
+        # 해당 시간의 프레임 인덱스 계산
+        fps = store['fps']
+        frame_idx = int((current_pos_ms / 1000) * fps)
+        frame_idx = min(frame_idx, len(store['frames']) - 1)
+        frame_idx = max(frame_idx, 0)
+
+        frame_data = store['frames'][frame_idx]
+        return frame_data.get('pose_landmarks')
 
 def smooth_landmarks(page_key, current_landmarks):
     """
@@ -2632,8 +2716,19 @@ def compare_poses(user_landmarks, expert_landmarks):
             diff = abs(user_angles[joint_name] - expert_angles[joint_name])
             angle_diffs[joint_name] = diff
 
-            # 점수 계산 (차이가 0도 = 100점, 30도 이상 = 0점)
-            score = max(0, 100 - (diff / 30.0) * 100)
+            # 점수 계산 (개선된 공식)
+            # - 10도 이내: 100점 (허용 오차)
+            # - 10~45도: 비선형 감점 (부드러운 곡선)
+            # - 45도 이상: 0점
+            if diff <= 10:
+                score = 100  # 허용 오차 내
+            elif diff >= 45:
+                score = 0
+            else:
+                # 10~45도 구간: 비선형 감점 (코사인 곡선으로 부드럽게)
+                # diff=10 → score=100, diff=45 → score=0
+                normalized = (diff - 10) / 35.0  # 0~1 범위
+                score = 100 * (1 - normalized ** 1.5)  # 비선형 감점
             joint_scores[joint_name] = score
 
     # 비교 가능한 관절이 하나도 없는 경우
@@ -4041,7 +4136,7 @@ def show_action_page():
     processed_video_path = f"videos/processed/skeleton_{video_filename}"
 
     # ===========================================================================
-    # 6. 전문가 랜드마크 로드 (자세 비교용)
+    # 6. 전문가 랜드마크 로드 (자세 비교용 - 전체 프레임 데이터)
     # ===========================================================================
     expert_reference_landmarks = None
 
@@ -4050,10 +4145,17 @@ def show_action_page():
     print(f"[DEBUG] 파일 존재 여부: {os.path.exists(landmarks_json_path)}")
 
     if os.path.exists(landmarks_json_path):
-        expert_reference_landmarks = load_expert_landmarks(landmarks_json_path)
-        if expert_reference_landmarks:
-            set_expert_landmarks('action_page', expert_reference_landmarks)
-            print(f"[DEBUG] 전문가 랜드마크 로드 성공: {len(expert_reference_landmarks)}개")
+        # 전체 프레임 데이터 로드 (동적 비교용)
+        all_landmarks_data = load_all_expert_landmarks(landmarks_json_path)
+        if all_landmarks_data and all_landmarks_data['frames']:
+            set_expert_landmarks_data(
+                'action_page',
+                all_landmarks_data['frames'],
+                all_landmarks_data['fps'],
+                all_landmarks_data['total_frames']
+            )
+            expert_reference_landmarks = get_expert_landmarks('action_page')  # 단일 랜드마크 (호환용)
+            print(f"[DEBUG] 전문가 랜드마크 로드 성공: {all_landmarks_data['total_frames']}프레임, {all_landmarks_data['fps']}fps")
         else:
             st.warning(f"⚠️ 랜드마크 파일은 있지만 데이터가 없습니다: {landmarks_json_path}")
     else:
@@ -4072,9 +4174,12 @@ def show_action_page():
         # 스켈레톤 오버레이된 영상이 있으면 우선 사용 (학습에 더 효과적)
         if os.path.exists(processed_video_path):
             st.video(processed_video_path, loop=True, autoplay=True, muted=True)
+            # 영상 재생 시작 시간 기록 (동적 비교용)
+            set_expert_video_start_time('action_page')
         elif os.path.exists(video_path):
             # 원본 영상 재생
             st.video(video_path, loop=True, autoplay=True, muted=True)
+            set_expert_video_start_time('action_page')
         else:
             st.info(f"{action['name']} 시범 영상 - 업로드 예정")
         # 피드백 표시 영역 (전문가 영상 아래)
@@ -4123,7 +4228,8 @@ def show_action_page():
 
                     # 자세 비교 (0.5초마다)
                     if current_time - _last_comparison_time['action_page'] >= 0.5:
-                        expert_lm = get_expert_landmarks('action_page')
+                        # 현재 영상 재생 위치에 맞는 전문가 랜드마크 가져오기 (동적 비교)
+                        expert_lm = get_expert_landmark_at_time('action_page', current_time)
                         if expert_lm:
                             try:
                                 comparison_result = compare_poses(user_result.pose_landmarks[0], expert_lm)
@@ -6258,7 +6364,7 @@ def process_expert_video_with_skeleton(expert_video_path):
 
 def load_expert_landmarks(landmarks_json_path):
     """
-    전문가 랜드마크 JSON 파일에서 대표 프레임 랜드마크 로드
+    전문가 랜드마크 JSON 파일에서 대표 프레임 랜드마크 로드 (기존 호환용)
 
     Returns:
         list: 대표 프레임의 pose_landmarks (33개 랜드마크) 또는 None
@@ -6287,6 +6393,31 @@ def load_expert_landmarks(landmarks_json_path):
 
     except Exception as e:
         print(f"랜드마크 로드 실패: {e}")
+        return None
+
+
+def load_all_expert_landmarks(landmarks_json_path):
+    """
+    전문가 랜드마크 JSON 파일에서 모든 프레임 데이터 로드 (동적 비교용)
+
+    Returns:
+        dict: {'frames': [...], 'fps': float, 'total_frames': int} 또는 None
+    """
+    if not os.path.exists(landmarks_json_path):
+        return None
+
+    try:
+        with open(landmarks_json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        return {
+            'frames': data.get('frames', []),
+            'fps': data.get('fps', 30),
+            'total_frames': data.get('total_frames', 0)
+        }
+
+    except Exception as e:
+        print(f"전체 랜드마크 로드 실패: {e}")
         return None
 
 
