@@ -35,33 +35,60 @@ import av
 from streamlit_autorefresh import st_autorefresh
 import threading
 
+# 클라이언트 측 MediaPipe 컴포넌트 (STUN/TURN 불필요 - 권장)
+# WebRTC 연결 문제 해결을 위해 브라우저에서 직접 MediaPipe 실행
+from components.pose_comparison_component import pose_comparison_component
+
+# 카메라 모드 설정: 'client' (권장, STUN/TURN 불필요) 또는 'webrtc' (기존 방식)
+CAMERA_MODE = 'client'
+
 # =============================================================================
 # WebRTC ICE 서버 설정 (STUN + TURN)
 # iOS 및 제한적인 NAT 환경에서는 TURN 서버가 필요함
+# Metered.ca 무료 TURN 서버 사용 (월 500GB 무료, OpenRelay보다 안정적)
+# 설정: Streamlit Secrets에 TURN_SERVER_URL, TURN_USERNAME, TURN_CREDENTIAL 추가
 # =============================================================================
-RTC_CONFIG = RTCConfiguration({
-    "iceServers": [
+def get_rtc_config():
+    """TURN 서버 설정을 가져옴 (Secrets 또는 기본값 사용)"""
+    ice_servers = [
         {"urls": ["stun:stun.l.google.com:19302"]},
         {"urls": ["stun:stun1.l.google.com:19302"]},
-        {"urls": ["stun:stun2.l.google.com:19302"]},
-        # OpenRelay 무료 TURN 서버 (공개용)
-        {
-            "urls": "turn:openrelay.metered.ca:80",
-            "username": "openrelayproject",
-            "credential": "openrelayproject"
-        },
-        {
-            "urls": "turn:openrelay.metered.ca:443",
-            "username": "openrelayproject",
-            "credential": "openrelayproject"
-        },
-        {
-            "urls": "turn:openrelay.metered.ca:443?transport=tcp",
-            "username": "openrelayproject",
-            "credential": "openrelayproject"
-        },
     ]
-})
+
+    # Streamlit Secrets에서 TURN 서버 설정 가져오기
+    try:
+        turn_url = st.secrets.get("TURN_SERVER_URL")
+        turn_username = st.secrets.get("TURN_USERNAME")
+        turn_credential = st.secrets.get("TURN_CREDENTIAL")
+
+        if turn_url and turn_username and turn_credential:
+            # Metered.ca 또는 다른 TURN 서버 사용
+            ice_servers.extend([
+                {
+                    "urls": turn_url,
+                    "username": turn_username,
+                    "credential": turn_credential
+                },
+                {
+                    "urls": turn_url.replace(":80", ":443") if ":80" in turn_url else turn_url,
+                    "username": turn_username,
+                    "credential": turn_credential
+                },
+                {
+                    "urls": f"{turn_url}?transport=tcp",
+                    "username": turn_username,
+                    "credential": turn_credential
+                },
+            ])
+        else:
+            # Secrets 미설정 시 기본 STUN만 사용 (TURN 없음)
+            pass
+    except Exception:
+        pass
+
+    return RTCConfiguration({"iceServers": ice_servers})
+
+RTC_CONFIG = get_rtc_config()
 
 # =============================================================================
 # WebRTC 공유 상태 (st.cache_resource로 리렌더링/모듈 재로드 간 유지)
@@ -4062,7 +4089,8 @@ def show_action_page():
     # 1. 현재 동작 정보 로드 및 진행 상태 확인
     # ===========================================================================
     # 현재 언어에 맞는 기본 동작 가져오기 (한국어/영어 지원)
-    basic_actions = get_basic_actions(st.session_state.language)
+    lang = st.session_state.language
+    basic_actions = get_basic_actions(lang)
 
     # 모든 동작을 완료했으면 밈 카드 생성 페이지로 이동
     if st.session_state.current_action >= len(basic_actions):
@@ -4186,106 +4214,164 @@ def show_action_page():
         feedback_placeholder = st.empty()
 
     # -------------------------------------------------------------------------
-    # 7-2. 오른쪽 컬럼: 사용자 웹캠 (WebRTC 기반)
+    # 7-2. 오른쪽 컬럼: 사용자 웹캠
     # -------------------------------------------------------------------------
     with col2:
         st.markdown(f"#### {t('your_movement')}")
 
-        # MediaPipe 모델 가져오기 (@st.cache_resource로 캐시됨)
-        # - Pose Landmarker: 33개 신체 랜드마크 감지
-        # - Hand Landmarker: 21개 손 랜드마크 감지 (선택적)
-        user_pose_landmarker = get_pose_landmarker(0.5, 0.5)
-        user_hand_landmarker = get_hand_landmarker(0.5, 0.5)
+        # =====================================================================
+        # 카메라 모드에 따른 분기
+        # - 'client': 클라이언트 측 MediaPipe (STUN/TURN 불필요, 권장)
+        # - 'webrtc': 기존 WebRTC 방식 (STUN/TURN 필요)
+        # =====================================================================
+        if CAMERA_MODE == 'client':
+            # -----------------------------------------------------------------
+            # 클라이언트 측 MediaPipe 컴포넌트 (권장)
+            # -----------------------------------------------------------------
+            # 장점:
+            # - STUN/TURN 서버 불필요 (연결 문제 없음)
+            # - 서버 부하 감소 (MediaPipe가 브라우저에서 실행)
+            # - 낮은 지연 시간
+            # 단점:
+            # - 클라이언트 디바이스 성능에 의존
+            # - 구형 브라우저/디바이스에서 느릴 수 있음
 
-        # ---------------------------------------------------------------------
-        # WebRTC 비디오 프레임 콜백 함수
-        # ---------------------------------------------------------------------
-        # 주의: 이 함수는 별도의 스레드에서 실행됨!
-        # - st.session_state에 직접 접근 불가 (Streamlit 컨텍스트 없음)
-        # - 대신 모듈 레벨 전역 변수(_webrtc_shared_state)를 통해 데이터 공유
-        # - update_webrtc_state()로 상태 업데이트 → UI는 st_autorefresh로 반영
-        # - update_feedback_analytics()로 점수 평활화 및 피드백 안정화
-        def video_frame_callback(frame: av.VideoFrame) -> av.VideoFrame:
-            """
-            WebRTC 스트림의 각 프레임을 처리하는 콜백
-            - 스켈레톤만 그리고, 피드백은 UI에서 표시
-            """
-            global _last_comparison_time
-            img = frame.to_ndarray(format="rgb24")
-            img = cv2.flip(img, 1)
+            # 전문가 랜드마크 준비 (첫 프레임 또는 대표 프레임)
+            expert_lm_for_client = None
+            if expert_reference_landmarks:
+                # expert_reference_landmarks는 MediaPipe PoseLandmark 객체일 수 있음
+                # JavaScript로 전달하기 위해 dict 리스트로 변환
+                if hasattr(expert_reference_landmarks[0], 'x'):
+                    # MediaPipe 객체인 경우
+                    expert_lm_for_client = [
+                        {'x': lm.x, 'y': lm.y, 'z': lm.z, 'visibility': lm.visibility}
+                        for lm in expert_reference_landmarks
+                    ]
+                elif isinstance(expert_reference_landmarks[0], dict):
+                    # 이미 dict인 경우
+                    expert_lm_for_client = expert_reference_landmarks
+                else:
+                    expert_lm_for_client = None
+
+            # 클라이언트 컴포넌트 렌더링
+            pose_comparison_component(
+                expert_landmarks=expert_lm_for_client,
+                action_name=action['name'],
+                key=f"pose_comp_{action['name']}",
+                height=480,
+                width=640,
+                target_score=80,
+                lang=lang,
+            )
+
+            # 클라이언트 모드: 다음 동작 버튼 (항상 표시)
+            # JavaScript 컴포넌트에서 성공 시 "다음 동작" 버튼이 나타나지만,
+            # Streamlit과 통신이 어려우므로 별도의 Streamlit 버튼도 제공
+            st.markdown("---")
+            next_col1, next_col2, next_col3 = st.columns([1, 2, 1])
+            with next_col2:
+                if st.button(
+                    "➡️ 다음 동작으로" if lang == 'ko' else "➡️ Next Action",
+                    key="client_next_action_btn",
+                    type="primary",
+                    use_container_width=True
+                ):
+                    current_idx = st.session_state.get('current_action_idx', 0)
+                    total_actions = len(st.session_state.get('selected_actions', []))
+                    if current_idx < total_actions - 1:
+                        st.session_state.current_action_idx = current_idx + 1
+                        st.rerun()
+                    else:
+                        # 마지막 동작 완료
+                        st.session_state.page = 'complete'
+                        st.rerun()
+
+            # 클라이언트 모드에서는 webrtc_ctx가 없음
+            webrtc_ctx = None
+
+        else:
+            # -----------------------------------------------------------------
+            # 기존 WebRTC 방식 (STUN/TURN 필요)
+            # -----------------------------------------------------------------
+            # MediaPipe 모델 가져오기 (@st.cache_resource로 캐시됨)
+            user_pose_landmarker = get_pose_landmarker(0.5, 0.5)
+            user_hand_landmarker = get_hand_landmarker(0.5, 0.5)
+
+            def video_frame_callback(frame: av.VideoFrame) -> av.VideoFrame:
+                """WebRTC 스트림의 각 프레임을 처리하는 콜백"""
+                global _last_comparison_time
+                img = frame.to_ndarray(format="rgb24")
+                img = cv2.flip(img, 1)
+
+                try:
+                    import time
+                    current_time = time.time()
+                    timestamp_ms = int(current_time * 1000)
+
+                    user_mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img)
+                    user_result = user_pose_landmarker.detect_for_video(user_mp_image, timestamp_ms)
+
+                    if user_result.pose_landmarks:
+                        img = draw_landmarks_on_image(img, user_result, page_key='action_page')
+                        update_webrtc_state('action_page', {'pose_detected': True})
+
+                        if current_time - _last_comparison_time['action_page'] >= 0.5:
+                            expert_lm = get_expert_landmark_at_time('action_page', current_time)
+                            if expert_lm:
+                                try:
+                                    comparison_result = compare_poses(user_result.pose_landmarks[0], expert_lm)
+                                    raw_score = comparison_result['overall_score']
+                                    raw_feedback = comparison_result['feedback']
+
+                                    update_feedback_analytics('action_page', raw_score, raw_feedback, current_time)
+                                    analytics = get_feedback_analytics('action_page')
+
+                                    update_webrtc_state('action_page', {
+                                        'feedback_score': analytics['smoothed_score'],
+                                        'feedback_messages': analytics['stable_feedback'],
+                                        'joint_coverage': comparison_result.get('joint_coverage_percent', 100),
+                                        'pose_detected': True,
+                                        'score_trend': analytics['score_trend'],
+                                        'good_pose_time': analytics['good_pose_time'],
+                                    })
+                                    _last_comparison_time['action_page'] = current_time
+                                except Exception as e:
+                                    print(f"[ACTION] 비교 오류: {e}")
+                    else:
+                        update_webrtc_state('action_page', {'pose_detected': False})
+
+                    hand_result = user_hand_landmarker.detect_for_video(user_mp_image, timestamp_ms)
+                    if hand_result.hand_landmarks:
+                        img = draw_hands_on_image(img, hand_result)
+
+                except Exception as e:
+                    import traceback
+                    print(f"[ACTION] 콜백 예외: {e}")
+                    traceback.print_exc()
+
+                return av.VideoFrame.from_ndarray(img, format="rgb24")
 
             try:
-                import time
-                current_time = time.time()
-                timestamp_ms = int(current_time * 1000)
-
-                user_mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=img)
-                user_result = user_pose_landmarker.detect_for_video(user_mp_image, timestamp_ms)
-
-                if user_result.pose_landmarks:
-                    img = draw_landmarks_on_image(img, user_result, page_key='action_page')
-                    update_webrtc_state('action_page', {'pose_detected': True})
-
-                    # 자세 비교 (0.5초마다)
-                    if current_time - _last_comparison_time['action_page'] >= 0.5:
-                        # 현재 영상 재생 위치에 맞는 전문가 랜드마크 가져오기 (동적 비교)
-                        expert_lm = get_expert_landmark_at_time('action_page', current_time)
-                        if expert_lm:
-                            try:
-                                comparison_result = compare_poses(user_result.pose_landmarks[0], expert_lm)
-                                raw_score = comparison_result['overall_score']
-                                raw_feedback = comparison_result['feedback']
-
-                                update_feedback_analytics('action_page', raw_score, raw_feedback, current_time)
-                                analytics = get_feedback_analytics('action_page')
-
-                                update_webrtc_state('action_page', {
-                                    'feedback_score': analytics['smoothed_score'],
-                                    'feedback_messages': analytics['stable_feedback'],
-                                    'joint_coverage': comparison_result.get('joint_coverage_percent', 100),
-                                    'pose_detected': True,
-                                    'score_trend': analytics['score_trend'],
-                                    'good_pose_time': analytics['good_pose_time'],
-                                })
-                                _last_comparison_time['action_page'] = current_time
-                            except Exception as e:
-                                print(f"[ACTION] 비교 오류: {e}")
-                else:
-                    update_webrtc_state('action_page', {'pose_detected': False})
-
-                # 손 감지
-                hand_result = user_hand_landmarker.detect_for_video(user_mp_image, timestamp_ms)
-                if hand_result.hand_landmarks:
-                    img = draw_hands_on_image(img, hand_result)
-
-            except Exception as e:
-                import traceback
-                print(f"[ACTION] 콜백 예외: {e}")
-                traceback.print_exc()
-
-            return av.VideoFrame.from_ndarray(img, format="rgb24")
-
-        # ---------------------------------------------------------------------
-        # WebRTC 스트리머 설정
-        # ---------------------------------------------------------------------
-        # - SENDRECV: 양방향 통신 (카메라 입력 + 처리된 영상 출력)
-        # - STUN 서버: NAT 통과를 위한 Google STUN 서버 사용
-        # - async_processing: True로 설정하여 비동기 처리 활성화
-        webrtc_ctx = webrtc_streamer(
-            key="user_camera_action",
-            mode=WebRtcMode.SENDRECV,
-            rtc_configuration=RTC_CONFIG,
-            video_frame_callback=video_frame_callback,
-            media_stream_constraints={
-                "video": {
-                    "width": {"ideal": 1280, "min": 640},
-                    "height": {"ideal": 720, "min": 480},
-                    "frameRate": {"ideal": 30, "max": 30}
-                },
-                "audio": False
-            },
-            async_processing=True,
-        )
+                webrtc_ctx = webrtc_streamer(
+                    key="user_camera_action",
+                    mode=WebRtcMode.SENDRECV,
+                    rtc_configuration=RTC_CONFIG,
+                    video_frame_callback=video_frame_callback,
+                    media_stream_constraints={
+                        "video": {
+                            "width": {"ideal": 1280, "min": 640},
+                            "height": {"ideal": 720, "min": 480},
+                            "frameRate": {"ideal": 30, "max": 30}
+                        },
+                        "audio": False
+                    },
+                    async_processing=True,
+                )
+            except AttributeError as e:
+                st.warning("카메라 연결 중 오류가 발생했습니다. 페이지를 새로고침해주세요.")
+                if st.button("🔄 새로고침", key="refresh_action_webrtc"):
+                    st.rerun()
+                webrtc_ctx = None
 
     # ===========================================================================
     # 8. 실시간 피드백 표시 (@st.fragment로 부분 새로고침)
@@ -4301,6 +4387,10 @@ def show_action_page():
     @st.fragment(run_every=2)  # 2초마다 이 영역만 새로고침
     def render_feedback():
         """피드백 영역만 부분 새로고침 (전체 페이지 깜박임 방지)"""
+        # 클라이언트 모드에서는 피드백이 JavaScript에서 처리됨
+        if CAMERA_MODE == 'client':
+            return
+
         state = get_webrtc_state('action_page')
         score = state.get('feedback_score', 0)
         messages = state.get('feedback_messages', [])
@@ -6720,21 +6810,28 @@ def show_pose_test_page():
         # ---------------------------------------------------------------------
         # - SENDRECV: 카메라 입력 + 처리된 영상 출력
         # - STUN 서버: NAT 통과용 (Google 공개 STUN 서버)
-        webrtc_ctx = webrtc_streamer(
-            key="pose_test_camera",
-            mode=WebRtcMode.SENDRECV,
-            rtc_configuration=RTC_CONFIG,
-            video_frame_callback=video_frame_callback,
-            media_stream_constraints={
-                "video": {
-                    "width": {"ideal": 1280, "min": 640},
-                    "height": {"ideal": 720, "min": 480},
-                    "frameRate": {"ideal": 30, "max": 30}
+        # - try-except: 세션 충돌 시 AttributeError 방지
+        try:
+            webrtc_ctx = webrtc_streamer(
+                key="pose_test_camera",
+                mode=WebRtcMode.SENDRECV,
+                rtc_configuration=RTC_CONFIG,
+                video_frame_callback=video_frame_callback,
+                media_stream_constraints={
+                    "video": {
+                        "width": {"ideal": 1280, "min": 640},
+                        "height": {"ideal": 720, "min": 480},
+                        "frameRate": {"ideal": 30, "max": 30}
+                    },
+                    "audio": False
                 },
-                "audio": False
-            },
-            async_processing=True,
-        )
+                async_processing=True,
+            )
+        except AttributeError as e:
+            st.warning("카메라 연결 중 오류가 발생했습니다. 페이지를 새로고침해주세요.")
+            if st.button("🔄 새로고침", key="refresh_pose_webrtc"):
+                st.rerun()
+            webrtc_ctx = None
 
         # ---------------------------------------------------------------------
         # 3-2-5. 실시간 피드백 표시 (@st.fragment로 부분 새로고침)
@@ -6785,7 +6882,7 @@ def show_pose_test_page():
         with feedback_container:
             render_pose_test_feedback()
 
-        if not webrtc_ctx.state.playing:
+        if webrtc_ctx and not webrtc_ctx.state.playing:
             reset_webrtc_state('pose_test_page')
 
     # ===========================================================================
