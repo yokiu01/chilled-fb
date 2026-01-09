@@ -4314,20 +4314,31 @@ def show_action_page():
             return
 
         if score > 0:
-            # 80점 이상: 축하 효과 + 다음 동작 버튼
-            if score >= 80:
-                # 축하 효과 (해당 동작에서 처음 80점 달성 시에만)
-                current_action_key = f"action_{st.session_state.current_action}"
-                if current_action_key not in st.session_state.celebrated_actions:
-                    st.session_state.celebrated_actions.add(current_action_key)
-                    st.balloons()
+            current_action_key = f"action_{st.session_state.current_action}"
+            # 80점 달성 여부 체크 (한 번 달성하면 기억)
+            has_achieved_80 = current_action_key in st.session_state.celebrated_actions
 
+            # 80점 이상 달성 시 축하 효과 (처음 1회만)
+            if score >= 80 and not has_achieved_80:
+                st.session_state.celebrated_actions.add(current_action_key)
+                has_achieved_80 = True
+                st.balloons()
+
+            # 80점 달성한 적 있으면: 축하 메시지 + 다음 동작 버튼 (점수 떨어져도 유지)
+            if has_achieved_80:
                 # 축하 메시지 박스
-                st.success(f"""
-                🎉 **훌륭합니다! {score:.0f}점 달성!**
+                if score >= 80:
+                    st.success(f"""
+                    🎉 **훌륭합니다! {score:.0f}점!**
 
-                이 동작을 완벽하게 수행했습니다!
-                """)
+                    이 동작을 완벽하게 수행했습니다!
+                    """)
+                else:
+                    st.info(f"""
+                    ✅ **80점 달성 완료!** (현재 {score:.0f}점)
+
+                    다음 동작으로 넘어갈 수 있습니다.
+                    """)
 
                 # 다음 동작 버튼
                 col1, col2 = st.columns(2)
@@ -4350,7 +4361,7 @@ def show_action_page():
                 # 현재 점수도 표시
                 st.markdown(f"**현재 점수: {score:.0f}점** | 감지된 관절: {coverage}%")
             else:
-                # 80점 미만: 기존 피드백 표시
+                # 아직 80점 미달성: 기존 피드백 표시
                 score_color = "🟡" if score >= 60 else "🔴"
                 feedback_text = f"**{score_color} {score:.0f}점, 카메라에 감지된 관절: {coverage}%**\n\n"
 
