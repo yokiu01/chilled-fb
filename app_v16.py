@@ -36,6 +36,34 @@ from streamlit_autorefresh import st_autorefresh
 import threading
 
 # =============================================================================
+# WebRTC ICE 서버 설정 (STUN + TURN)
+# iOS 및 제한적인 NAT 환경에서는 TURN 서버가 필요함
+# =============================================================================
+RTC_CONFIG = RTCConfiguration({
+    "iceServers": [
+        {"urls": ["stun:stun.l.google.com:19302"]},
+        {"urls": ["stun:stun1.l.google.com:19302"]},
+        {"urls": ["stun:stun2.l.google.com:19302"]},
+        # OpenRelay 무료 TURN 서버 (공개용)
+        {
+            "urls": "turn:openrelay.metered.ca:80",
+            "username": "openrelayproject",
+            "credential": "openrelayproject"
+        },
+        {
+            "urls": "turn:openrelay.metered.ca:443",
+            "username": "openrelayproject",
+            "credential": "openrelayproject"
+        },
+        {
+            "urls": "turn:openrelay.metered.ca:443?transport=tcp",
+            "username": "openrelayproject",
+            "credential": "openrelayproject"
+        },
+    ]
+})
+
+# =============================================================================
 # WebRTC 공유 상태 (st.cache_resource로 리렌더링/모듈 재로드 간 유지)
 # =============================================================================
 # ⚠️ 주의사항:
@@ -371,7 +399,7 @@ def reset_feedback_analytics(page_key):
 
 @st.cache_resource
 def get_pose_landmarker(detection_conf=0.5, tracking_conf=0.5):
-    pose_model_path = os.path.join(os.path.dirname(__file__), "models", "pose_landmarker_lite.task")
+    pose_model_path = os.path.join(os.path.dirname(__file__), "models", "pose_landmarker_full.task")
     pose_base_options = python.BaseOptions(model_asset_path=pose_model_path)
     pose_options = vision.PoseLandmarkerOptions(
         base_options=pose_base_options,
@@ -2390,7 +2418,7 @@ def render_detail_videos(detail_videos, main_video_path):
 @st.cache_resource
 def init_mediapipe():
     """MediaPipe Pose Landmarker 초기화 (새 API)"""
-    model_path = os.path.join(os.path.dirname(__file__), "models", "pose_landmarker_lite.task")
+    model_path = os.path.join(os.path.dirname(__file__), "models", "pose_landmarker_full.task")
 
     # PoseLandmarker 옵션 설정
     base_options = python.BaseOptions(model_asset_path=model_path)
@@ -2501,7 +2529,7 @@ def calculate_joint_angles(landmarks):
         return {}
 
     angles = {}
-    MIN_VISIBILITY = 0.8  # 최소 visibility 임계값 (신뢰도 높은 관절만 사용)
+    MIN_VISIBILITY = 0.5  # 최소 visibility 임계값 (인식률 향상을 위해 0.8에서 낮춤)
 
     try:
         # 왼쪽 팔꿈치 (어깨11 - 팔꿈치13 - 손목15)
@@ -4140,9 +4168,16 @@ def show_action_page():
         webrtc_ctx = webrtc_streamer(
             key="user_camera_action",
             mode=WebRtcMode.SENDRECV,
-            rtc_configuration=RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}),
+            rtc_configuration=RTC_CONFIG,
             video_frame_callback=video_frame_callback,
-            media_stream_constraints={"video": True, "audio": False},
+            media_stream_constraints={
+                "video": {
+                    "width": {"ideal": 1280, "min": 640},
+                    "height": {"ideal": 720, "min": 480},
+                    "frameRate": {"ideal": 30, "max": 30}
+                },
+                "audio": False
+            },
             async_processing=True,
         )
 
@@ -6085,7 +6120,7 @@ def process_expert_video_with_skeleton(expert_video_path):
         print(f"전문가 영상 처리 중: {video_filename}...")
 
         # MediaPipe 초기화
-        pose_model_path = os.path.join(os.path.dirname(__file__), "models", "pose_landmarker_lite.task")
+        pose_model_path = os.path.join(os.path.dirname(__file__), "models", "pose_landmarker_full.task")
         pose_base_options = python.BaseOptions(model_asset_path=pose_model_path)
         pose_options = vision.PoseLandmarkerOptions(
             base_options=pose_base_options,
@@ -6518,9 +6553,16 @@ def show_pose_test_page():
         webrtc_ctx = webrtc_streamer(
             key="pose_test_camera",
             mode=WebRtcMode.SENDRECV,
-            rtc_configuration=RTCConfiguration({"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}),
+            rtc_configuration=RTC_CONFIG,
             video_frame_callback=video_frame_callback,
-            media_stream_constraints={"video": True, "audio": False},
+            media_stream_constraints={
+                "video": {
+                    "width": {"ideal": 1280, "min": 640},
+                    "height": {"ideal": 720, "min": 480},
+                    "frameRate": {"ideal": 30, "max": 30}
+                },
+                "audio": False
+            },
             async_processing=True,
         )
 
