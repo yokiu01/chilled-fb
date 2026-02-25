@@ -3667,7 +3667,24 @@ def main():
         if new_lang != st.session_state.language:
             st.session_state.language = new_lang
             st.rerun()
-    
+
+        # MU:ON 앱 다운로드 버튼 (최하단)
+        st.markdown("---")
+        st.markdown("### 📱 MU:ON 앱")
+
+        apk_path = "assets/muon_app.apk"
+        if os.path.exists(apk_path):
+            with open(apk_path, "rb") as apk_file:
+                st.download_button(
+                    label="📥 MU:ON 앱 다운로드",
+                    data=apk_file.read(),
+                    file_name="MU_ON.apk",
+                    mime="application/vnd.android.package-archive",
+                    use_container_width=True
+                )
+        else:
+            st.info("앱 준비 중...")
+
     # 헤더
     st.markdown(f"""
     <div style='text-align: center; padding: 2rem 0;'>
