@@ -3678,7 +3678,7 @@ def main():
                 st.download_button(
                     label="📥 MU:ON 앱 다운로드",
                     data=apk_file.read(),
-                    file_name="MU_ON.apk",
+                    file_name="MUON 1.1.1.apk",
                     mime="application/vnd.android.package-archive",
                     use_container_width=True
                 )
